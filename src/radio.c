@@ -1480,6 +1480,17 @@ void radio_start_radio() {
 
   case SOAPYSDR_USB_DEVICE:
     snprintf(property_path, sizeof(property_path), "%s.props", radio->name);
+    //
+    // The LimeSDR comes in two variants, a full-fledged one with 2RX,
+    // and a LimeSDR-Mini with 1RX. The driver (and thus the radio name)
+    // is "lime" in both cases, but allow them to have distinct props
+    // files. The same may apply to other radios e.g. the Pluto as well,
+    // but for the sake of backwards compatibility this "hook" is currently
+    // only activated for the LIME.
+    //
+    if (have_lime && radio->info.soapy.rx_channels > 1) {
+        snprintf(property_path, sizeof(property_path), "%s-2rx.props", radio->name);
+    }
     break;
 
   default:
@@ -1720,9 +1731,6 @@ void radio_start_radio() {
     for (int id = 0; id < RECEIVERS; id++) {
       RECEIVER *rx = receiver[id];
       int rxadc = rx->adc;
-      soapy_protocol_set_automatic_gain(rx, adc[rxadc].agc);
-      soapy_protocol_set_rx_antenna(rx, adc[rxadc].antenna);
-      soapy_protocol_set_rx_frequency(rx, id);
 
       if (have_lime && RECEIVERS == 2) {
         //
@@ -1750,7 +1758,9 @@ void radio_start_radio() {
         soapy_protocol_start_receiver(rx);
       }
 
-      soapy_protocol_set_gain(rx);
+      soapy_protocol_set_automatic_gain(rx, adc[rxadc].agc);
+      soapy_protocol_set_rx_antenna(rx, adc[rxadc].antenna);
+      soapy_protocol_set_rx_frequency(rx, id);
 
       if (!adc[rxadc].agc) { soapy_protocol_set_gain(rx); }
 
