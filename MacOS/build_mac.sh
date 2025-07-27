@@ -1,5 +1,3 @@
-
-
 #!/bin/zsh
 
 
@@ -84,6 +82,9 @@ elif [[ "$VERSION" == "DEV" ]]; then
   fi
 fi
 
+# Assume this script is running in the MacOS subdirectory of the Git repository, so
+# cd up a level to where the Makefile is in the root directory
+cd ..
 
 echo "\n🧹 Running make clean..."
 if ! make clean; then
