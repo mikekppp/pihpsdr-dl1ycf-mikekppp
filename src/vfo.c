@@ -1191,7 +1191,7 @@ void vfo_id_set_rit_step(int id, int step) {
 }
 
 //
-// vfo_move (and vfo_id_move) are exclusively used
+// vfo_id_move is exclusively used
 // to update the radio while dragging with the
 // pointer device in the panadapter area. Therefore,
 // the behaviour is different whether we use CTUN or not.
@@ -1251,7 +1251,7 @@ void vfo_id_move(int id, long long hz, int round) {
       // *Subtract* the shift (hz) from the VFO frequency
       vfo[id].frequency = vfo[id].frequency - hz;
 
-      if (round && (vfo[id].mode != modeCWL && vfo[id].mode != modeCWU)) {
+      if (round) {
         vfo[id].frequency = ROUND(vfo[id].frequency, 0, vfo[id].step);
       }
 
@@ -1305,34 +1305,13 @@ void vfo_id_move(int id, long long hz, int round) {
   }
 }
 
-void vfo_move(long long hz, int round) {
-  vfo_id_move(active_receiver->id, hz, round);
-}
-
-void vfo_move_to(long long hz) {
-  int id = active_receiver->id;
-  vfo_id_move_to(id, hz);
-}
-
-void vfo_id_move_to(int id, long long hz) {
+void vfo_id_move_to(int id, long long f, int round) {
   if (radio_is_remote) {
-    send_vfo_move_to(client_socket, id, hz);
+    send_vfo_move_to(client_socket, id, f, round);
     return;
   }
 
-  // hz is the offset from the min displayed frequency
-  const RECEIVER *myrx;
-
-  if (id < receivers) {
-    myrx = receiver[id];
-  } else {
-    myrx = active_receiver;
-  }
-
-  long long half = (long long)(myrx->sample_rate / 2);
-  long long f = (vfo[id].frequency - half) + hz + ((double)myrx->pan * myrx->hz_per_pixel);
-
-  if (vfo[id].mode != modeCWL && vfo[id].mode != modeCWU) {
+  if (round) {
     f = ROUND(f, 0, vfo[id].step);
   }
 
@@ -1342,25 +1321,11 @@ void vfo_id_move_to(int id, long long hz) {
     if (vfo[id].ctun) {
       delta = vfo[id].ctun_frequency;
       vfo[id].ctun_frequency = f;
-
-      if (vfo[id].mode == modeCWL) {
-        vfo[id].ctun_frequency += cw_keyer_sidetone_frequency;
-      } else if (vfo[id].mode == modeCWU) {
-        vfo[id].ctun_frequency -= cw_keyer_sidetone_frequency;
-      }
-
       delta = vfo[id].ctun_frequency - delta;
       vfo_id_adjust_band(id, vfo[id].ctun_frequency);
     } else {
       delta = vfo[id].frequency;
       vfo[id].frequency = f;
-
-      if (vfo[id].mode == modeCWL) {
-        vfo[id].frequency += cw_keyer_sidetone_frequency;
-      } else if (vfo[id].mode == modeCWU) {
-        vfo[id].frequency -= cw_keyer_sidetone_frequency;
-      }
-
       delta = vfo[id].frequency - delta;
       vfo_id_adjust_band(id, vfo[id].frequency);
     }
@@ -1448,7 +1413,7 @@ static gboolean vfo_draw_cb (GtkWidget *widget,
 //
 // This function re-draws the VFO bar.
 // Lot of elements are programmed, whose size and position
-// is determined by the current vfo_layout
+// is determined by the current vfo layout
 // Elements whose x-coordinate is zero are not drawn
 //
 void vfo_update() {
@@ -1496,7 +1461,7 @@ void vfo_update() {
 
   int f = vfo[id].filter;
   int txvfo = vfo_get_tx_vfo();
-  const VFO_BAR_LAYOUT *vfl = &vfo_layout_list[vfo_layout];
+  const VFO_BAR_LAYOUT *vfl = &vfo_layout_list[display_vfobar[display_size]];
   //
   // Filter used in active receiver
   //
@@ -2227,7 +2192,7 @@ static gboolean vfo_press_event_cb (GtkWidget *widget, GdkEventButton *event, gp
   case GDK_BUTTON_PRIMARY:
     v = VFO_A;
 
-    if (event->x >= abs(vfo_layout_list[vfo_layout].vfo_b_x)) { v = VFO_B; }
+    if (event->x >= abs(vfo_layout_list[display_vfobar[display_size]].vfo_b_x)) { v = VFO_B; }
 
     g_idle_add(ext_start_vfo, GINT_TO_POINTER(v));
     break;

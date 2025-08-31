@@ -170,6 +170,8 @@ int anan10E = 0;
 int mute_spkr_amp = 0;      // Mute audio amplifier in radio                (ANAN-7000, G2)
 int mute_spkr_xmit = 0;     // Mute audio amplifier in radio upon transmit  (ANAN-7000, G2)
 
+static int radio_protocol_running = 0;
+
 int tx_out_of_band_allowed = 0;
 
 int filter_board = ALEX;
@@ -217,6 +219,7 @@ int enable_tx_inhibit = 0;
 int TxInhibit = 0;
 
 int vfo_encoder_divisor = 1;
+int vfo_snap = 0;
 
 int protocol;
 int device;
@@ -545,6 +548,7 @@ static void choose_vfo_layout() {
   // b) secure that the VFO layout width fits
   //
   int rc;
+  int layout = display_vfobar[display_size];
   const VFO_BAR_LAYOUT *vfl;
   rc = 1;
   vfl = vfo_layout_list;
@@ -553,13 +557,13 @@ static void choose_vfo_layout() {
   for (;;) {
     if (vfl->width < 0) { break; }
 
-    if ((vfl - vfo_layout_list) == vfo_layout) { rc = 0; }
+    if ((vfl - vfo_layout_list) == layout) { rc = 0; }
 
     vfl++;
   }
 
   if (rc) {
-    vfo_layout = 0;
+    layout = 0;
   }
 
   METER_WIDTH = MIN_METER_WIDTH;
@@ -571,7 +575,7 @@ static void choose_vfo_layout() {
   // Choose the first largest layout that fits
   // with a minimum-width meter
   //
-  if (vfo_layout_list[vfo_layout].width > VFO_WIDTH) {
+  if (vfo_layout_list[layout].width > VFO_WIDTH) {
     vfl = vfo_layout_list;
 
     for (;;) {
@@ -585,18 +589,21 @@ static void choose_vfo_layout() {
       vfl++;
     }
 
-    vfo_layout = vfl - vfo_layout_list;
-    t_print("%s: vfo_layout changed (width=%d)\n", __FUNCTION__, vfl->width);
+    layout = vfl - vfo_layout_list;
+    //t_print("%s: vfo_layout changed (width=%d)\n", __FUNCTION__, vfl->width);
   }
 
   //
   // If chosen layout leaves at least 50 pixels unused:
   // give 50 extra pixels to the meter
   //
-  if (vfo_layout_list[vfo_layout].width < VFO_WIDTH - 50) {
+  if (vfo_layout_list[layout].width < VFO_WIDTH - 50) {
     VFO_WIDTH -= 50;
     METER_WIDTH += 50;
   }
+
+  VFO_HEIGHT = vfo_layout_list[layout].height;
+  display_vfobar[display_size] = layout;
 }
 
 static guint full_screen_timeout = 0;
@@ -662,11 +669,6 @@ void radio_reconfigure_screen() {
   }
 
   choose_vfo_layout();
-  VFO_HEIGHT = vfo_layout_list[vfo_layout].height;
-
-  //
-  // If there is enough space, increase the meter width
-  //
 
   //
   // Change sizes of main window, Hide and Menu buttons, meter, and vfo
@@ -778,14 +780,16 @@ void radio_reconfigure() {
 
     for (i = 0; i < receivers; i++) {
       RECEIVER *rx = receiver[i];
+      g_mutex_lock(&rx->display_mutex);
       rx->width = my_width / receivers;
-      rx_update_zoom(rx);
+      rx_update_width(rx);
       rx_reconfigure(rx, rx_height);
 
       if (!radio_is_transmitting() || duplex) {
         gtk_fixed_move(GTK_FIXED(fixed), rx->panel, x, y);
       }
 
+      g_mutex_unlock(&rx->display_mutex);
       rx->x = x;
       rx->y = y;
       x = x + my_width / receivers;
@@ -795,14 +799,16 @@ void radio_reconfigure() {
   } else {
     for (i = 0; i < receivers; i++) {
       RECEIVER *rx = receiver[i];
+      g_mutex_lock(&rx->display_mutex);
       rx->width = my_width;
-      rx_update_zoom(rx);
+      rx_update_width(rx);
       rx_reconfigure(rx, rx_height / receivers);
 
       if (!radio_is_transmitting() || duplex) {
         gtk_fixed_move(GTK_FIXED(fixed), rx->panel, 0, y);
       }
 
+      g_mutex_unlock(&rx->display_mutex);
       rx->x = 0;
       rx->y = y;
       y += rx_height / receivers;
@@ -964,7 +970,7 @@ static void radio_create_visual() {
     if (radio_is_remote) {
       rx_create_remote(receiver[i]);
     } else {
-      receiver[i] = rx_create_receiver(CHANNEL_RX0 + i, my_width, my_width, rx_height / RECEIVERS);
+      receiver[i] = rx_create_receiver(CHANNEL_RX0 + i, my_width, rx_height / RECEIVERS);
       rx_set_squelch(receiver[i]);
     }
 
@@ -975,7 +981,7 @@ static void radio_create_visual() {
 
     if (!radio_is_remote) {
       rx_set_displaying(receiver[i]);
-      rx_set_offset(receiver[i], vfo[i].offset);
+      rx_set_offset(receiver[i]);
     }
 
     gtk_fixed_put(GTK_FIXED(fixed), receiver[i]->panel, 0, y);
@@ -1112,7 +1118,7 @@ static void radio_create_visual() {
     receivers = RECEIVERS;
 
     if (radio_is_remote) {
-      radio_remote_change_receivers(r);
+      radio_remote_change_receivers(GINT_TO_POINTER(r));
     } else {
       radio_change_receivers(r);
     }
@@ -1507,6 +1513,8 @@ void radio_start_radio() {
 
   for (unsigned int i = 0; i < strlen(property_path); i++) {
     if (property_path[i] == '/') { property_path[i] = '.'; }
+
+    if (property_path[i] == ' ') { property_path[i] = '-'; }
   }
 
   //
@@ -1831,12 +1839,17 @@ void radio_start_radio() {
   //
   g_signal_handler_disconnect(top_window, keypress_signal_id);
   keypress_signal_id = g_signal_connect(top_window, "key_press_event", G_CALLBACK(radio_keypress_cb), NULL);
+  //
+  // mark radio as "running"
+  //
+  radio_protocol_running = 1;
 }
 
-void radio_remote_change_receivers(int r) {
+int radio_remote_change_receivers(gpointer data) {
+  int r = GPOINTER_TO_INT(data);
   t_print("radio_remote_change_receivers: from %d to %d\n", receivers, r);
 
-  if (receivers == r) { return; }
+  if (receivers == r) { return G_SOURCE_REMOVE; }
 
   switch (r) {
   case 1:
@@ -1856,6 +1869,7 @@ void radio_remote_change_receivers(int r) {
 
   radio_reconfigure_screen();
   rx_set_active(receiver[0]);
+  return G_SOURCE_REMOVE;
 }
 
 void radio_change_receivers(int r) {
@@ -2164,7 +2178,9 @@ void radio_toggle_mox() {
   radio_set_mox(!mox);
 }
 
-void radio_remote_set_vox(int state) {
+int radio_remote_set_vox(gpointer data) {
+  int state = GPOINTER_TO_INT(data);
+
   if (can_transmit) {
     if (state != radio_is_transmitting()) {
       rxtx(state);
@@ -2175,9 +2191,13 @@ void radio_remote_set_vox(int state) {
     vox = state;
     g_idle_add(ext_vfo_update, NULL);
   }
+
+  return G_SOURCE_REMOVE;
 }
 
-void radio_remote_set_mox(int state) {
+int radio_remote_set_mox(gpointer data) {
+  int state = GPOINTER_TO_INT(data);
+
   if (can_transmit) {
     if (state != radio_is_transmitting()) {
       rxtx(state);
@@ -2189,17 +2209,22 @@ void radio_remote_set_mox(int state) {
     vox = 0;
     g_idle_add(ext_vfo_update, NULL);
   }
+
+  return G_SOURCE_REMOVE;
 }
 
-void radio_remote_set_twotone(int state) {
+int radio_remote_set_twotone(gpointer data) {
   if (can_transmit) {
-    transmitter->twotone = state;
+    transmitter->twotone = GPOINTER_TO_INT(data);
   }
 
   g_idle_add(ext_vfo_update, NULL);
+  return G_SOURCE_REMOVE;
 }
 
-void radio_remote_set_tune(int state) {
+int radio_remote_set_tune(gpointer data) {
+  int state = GPOINTER_TO_INT(data);
+
   if (can_transmit) {
     if (state != transmitter->tune) {
       vox_cancel();
@@ -2216,6 +2241,8 @@ void radio_remote_set_tune(int state) {
 
     g_idle_add(ext_vfo_update, NULL);
   }
+
+  return G_SOURCE_REMOVE;
 }
 
 void radio_set_mox(int state) {
@@ -2636,7 +2663,7 @@ void radio_set_rf_gain(int id, double value) {
   int rxadc = receiver[id]->adc;
   adc[rxadc].gain = value;
   adc[rxadc].attenuation = 0.0;
-  sliders_rf_gain(id, rxadc);
+  g_idle_add(sliders_rf_gain, GINT_TO_POINTER(id));
 
   if (radio_is_remote) {
     send_rfgain(client_socket, id, adc[rxadc].gain);
@@ -2679,7 +2706,7 @@ void radio_set_squelch(int id, double value) {
   rx->squelch = value;
   rx->squelch_enable = (rx->squelch > 0.5);
   rx_set_squelch(rx);
-  sliders_squelch(rx->id);
+  g_idle_add(sliders_squelch, GINT_TO_POINTER(rx->id));
 }
 
 void radio_set_linein_gain(double value) {
@@ -2691,7 +2718,7 @@ void radio_set_linein_gain(double value) {
     schedule_high_priority();
   }
 
-  sliders_linein_gain();
+  g_idle_add(sliders_linein_gain, NULL);
 }
 
 void radio_set_mic_gain(double value) {
@@ -2700,7 +2727,7 @@ void radio_set_mic_gain(double value) {
     tx_set_mic_gain(transmitter);
   }
 
-  sliders_mic_gain();
+  g_idle_add(sliders_mic_gain, NULL);
 }
 
 void radio_set_af_gain(int id, double value) {
@@ -2709,7 +2736,7 @@ void radio_set_af_gain(int id, double value) {
   RECEIVER *rx = receiver[id];
   rx->volume = value;
   rx_set_af_gain(rx);
-  sliders_af_gain(id);
+  g_idle_add(sliders_af_gain, GINT_TO_POINTER(id));
 }
 
 void radio_set_agc_gain(int id, double value) {
@@ -2717,7 +2744,7 @@ void radio_set_agc_gain(int id, double value) {
 
   receiver[id]->agc_gain = value;
   rx_set_agc(receiver[id]);
-  sliders_agc_gain(id);
+  g_idle_add(sliders_agc_gain, GINT_TO_POINTER(id));
 }
 
 void radio_set_c25_att(int id, int val) {
@@ -2774,7 +2801,7 @@ void radio_set_c25_att(int id, int val) {
     }
   }
 
-  sliders_c25_att(id);
+  g_idle_add(sliders_c25_att, GINT_TO_POINTER(id));
 }
 
 void radio_set_dither(int id, int value) {
@@ -2827,7 +2854,7 @@ void radio_set_attenuation(int id, int value) {
   int rxadc = receiver[id]->adc;
   adc[rxadc].attenuation = value;
   adc[rxadc].gain = 0.0;
-  sliders_attenuation(id);
+  g_idle_add(sliders_attenuation, GINT_TO_POINTER(id));
 
   if (radio_is_remote) {
     send_attenuation(client_socket, id, value);
@@ -2855,7 +2882,7 @@ void radio_set_drive(double value) {
   }
 
   transmitter->drive = value;
-  sliders_drive();
+  g_idle_add(sliders_drive, NULL);
 
   if (radio_is_remote) {
     send_drive(client_socket, value);
@@ -3026,27 +3053,32 @@ static void radio_restore_state() {
   GetPropI0("display_zoompan",                               display_zoompan);
   GetPropI0("display_sliders",                               display_sliders);
   GetPropI0("display_toolbar",                               display_toolbar);
+  GetPropI0("display_width",                                 display_width[1]);
   GetPropI0("display_height",                                display_height[1]);
-  GetPropI0("vfo_layout",                                    vfo_layout);
+  GetPropI0("rx_stack_horizontal",                           rx_stack_horizontal);
+  GetPropI0("display_size",                                  display_size);
   GetPropI0("optimize_touchscreen",                          optimize_for_touchscreen);
   GetPropI0("which_css_font",                                which_css_font);
   GetPropI0("vfo_encoder_divisor",                           vfo_encoder_divisor);
+  GetPropI0("vfo_snap",                                      vfo_snap);
   GetPropI0("mute_rx_while_transmitting",                    mute_rx_while_transmitting);
   GetPropI0("analog_meter",                                  analog_meter);
   GetPropI0("vox_enabled",                                   vox_enabled);
   GetPropF0("vox_threshold",                                 vox_threshold);
   GetPropF0("vox_hang",                                      vox_hang);
   GetPropI0("radio.hpsdr_server",                            hpsdr_server);
+  GetPropI0("radio.server_stops_protocol",                   server_stops_protocol);
   GetPropS0("radio.hpsdr_pwd",                               hpsdr_pwd);
   GetPropI0("radio.hpsdr_server.listen_port",                listen_port);
   GetPropI0("tci_enable",                                    tci_enable);
   GetPropI0("tci_port",                                      tci_port);
   GetPropI0("tci_txonly",                                    tci_txonly);
 
+  for (int i = 0; i < 6; i++) {
+    GetPropI1("display_vfobar[%d]", i,                       display_vfobar[i]);
+  }
+
   if (!radio_is_remote) {
-    GetPropI0("rx_stack_horizontal",                         rx_stack_horizontal);
-    GetPropI0("display_size",                                display_size);
-    GetPropI0("display_width",                               display_width[1]);
     GetPropI0("enable_auto_tune",                            enable_auto_tune);
     GetPropI0("enable_tx_inhibit",                           enable_tx_inhibit);
     GetPropI0("radio_sample_rate",                           soapy_radio_sample_rate);
@@ -3166,6 +3198,7 @@ static void radio_restore_state() {
       display_width[1] = 640;
       display_height[1] = 400;
     }
+
     //
     // Assert that a standard size from the props file does not exceed the screen size
     //
@@ -3237,26 +3270,31 @@ void radio_save_state() {
   SetPropI0("display_sliders",                               hide_status ? old_slid : display_sliders);
   SetPropI0("display_toolbar",                               hide_status ? old_tool : display_toolbar);
   SetPropI0("display_height",                                display_height[1]);
-  SetPropI0("vfo_layout",                                    vfo_layout);
+  SetPropI0("rx_stack_horizontal",                           rx_stack_horizontal);
+  SetPropI0("display_size",                                  display_size);
+  SetPropI0("display_width",                                 display_width[1]);
   SetPropI0("optimize_touchscreen",                          optimize_for_touchscreen);
   SetPropI0("which_css_font",                                which_css_font);
   SetPropI0("vfo_encoder_divisor",                           vfo_encoder_divisor);
+  SetPropI0("vfo_snap",                                      vfo_snap);
   SetPropI0("mute_rx_while_transmitting",                    mute_rx_while_transmitting);
   SetPropI0("analog_meter",                                  analog_meter);
   SetPropI0("vox_enabled",                                   vox_enabled);
   SetPropF0("vox_threshold",                                 vox_threshold);
   SetPropF0("vox_hang",                                      vox_hang);
   SetPropI0("radio.hpsdr_server",                            hpsdr_server);
+  SetPropI0("radio.server_stops_protocol",                   server_stops_protocol);
   SetPropS0("radio.hpsdr_pwd",                               hpsdr_pwd);
   SetPropI0("radio.hpsdr_server.listen_port",                listen_port);
   SetPropI0("tci_enable",                                    tci_enable);
   SetPropI0("tci_port",                                      tci_port);
   SetPropI0("tci_txonly",                                    tci_txonly);
 
+  for (int i = 0; i < 6; i++) {
+    SetPropI1("display_vfobar[%d]", i,                       display_vfobar[i]);
+  }
+
   if (!radio_is_remote) {
-    SetPropI0("rx_stack_horizontal",                         rx_stack_horizontal);
-    SetPropI0("display_size",                                display_size);
-    SetPropI0("display_width",                               display_width[1]);
     SetPropI0("enable_auto_tune",                            enable_auto_tune);
     SetPropI0("enable_tx_inhibit",                           enable_tx_inhibit);
     SetPropI0("radio_sample_rate",                           soapy_radio_sample_rate);
@@ -3359,6 +3397,8 @@ int radio_remote_start(void *data) {
 
   for (unsigned int i = 0; i < strlen(property_path); i++) {
     if (property_path[i] == '/') { property_path[i] = '.'; }
+
+    if (property_path[i] == ' ') { property_path[i] = '-'; }
   }
 
   radio_is_remote = TRUE;
@@ -3387,6 +3427,7 @@ int radio_remote_start(void *data) {
   // for MIDI this  is the complete data set
   //
   radio_restore_state();
+  send_screen(client_socket, rx_stack_horizontal, display_width[display_size]);
   radio_create_visual();
   radio_reconfigure_screen();
 
@@ -3548,12 +3589,22 @@ int radio_max_band() {
   return max;
 }
 
+int radio_remote_protocol_stop(gpointer data) {
+  //
+  // stop protocol via GTK queue
+  //
+  radio_protocol_stop();
+  return G_SOURCE_REMOVE;
+}
+
 void radio_protocol_stop() {
   //
   // paranoia ...
   //
   radio_set_mox(0);
   usleep(100000);
+
+  if (!radio_protocol_running) { return; }
 
   switch (protocol) {
   case ORIGINAL_PROTOCOL:
@@ -3570,9 +3621,21 @@ void radio_protocol_stop() {
 #endif
     break;
   }
+
+  radio_protocol_running = 0;
+}
+
+int radio_remote_protocol_run(gpointer data) {
+  //
+  // start protocol via GTK queue
+  //
+  radio_protocol_run();
+  return G_SOURCE_REMOVE;
 }
 
 void radio_protocol_run() {
+  if (radio_protocol_running) { return; }
+
   switch (protocol) {
   case ORIGINAL_PROTOCOL:
     old_protocol_run();
@@ -3600,6 +3663,8 @@ void radio_protocol_run() {
 #endif
     break;
   }
+
+  radio_protocol_running = 1;
 }
 
 void radio_protocol_restart() {

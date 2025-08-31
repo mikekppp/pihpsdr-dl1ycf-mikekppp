@@ -152,9 +152,9 @@ convention as laid out here.
 Here we list the main new featured introduced in each version.
 
 \medskip
-\textbf{\pH Version 2.5, under development}
+\textbf{\pH Version 2.5, release planned for Sep. 2025}
 \begin{itemize}
-\item{First complete version of the Client/Server model (including the transmitter).
+\item{First complete version of the Client/Server model (including TX and CW).
 Server access is password protected.}
 \item{Better HermesLite-II and RadioBerry support.}
 \item{When both a scope and a waterfall is running for a receiver, the (relative) height of
@@ -163,6 +163,7 @@ the waterfall is user-adjustable.}
 capability if compiled on MacOS.}
 \item{Better support for LIME-SDR (2RX) and LIME-mini (1RX) radios.}
 \item{Option to have an SWR-dependent side tone while TUNE-ing.}
+\item{ZOOM now up to 32x.}
 \end{itemize}
 
 \medskip
@@ -504,10 +505,47 @@ by VFO-A. VFO-B then actually only controls controls the transmitter
 if using split mode, but the data stored in VFO-B can
 be quickly used, for example by copying VFO-B to VFO-A (the
 \bltt{A<B} command), or by swapping the two VFOs (the \bltt{A<>B} command).
+This Figure has been recorded (just to demonstrate this)
+on an Apple Macintosh, therefore, among other details, the
+top bar of the window looks a little different from what one sees
+on LINUX (see e.g. Fig. \ref{fig:zoom}).
+%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
+\section{What is a spectrum?}
+Some people get confused if the spectrum shows a noise floor at $-122$ dBm, while their S-meter
+reading ,,without signal'' is $-109$ dBm. These people then often ask which of the two figures tells
+them how much noise there is.
 
+It is important to note that a spectrum plots an energy \textit{density}, that is an energy (in dBm)
+per frequency interval. The RX panadapters in \pH normalise the spectrum to a frequency interval
+that is the frequency width of one pixel on the screen. An immediate consequence of this is, that the
+noise floor moves down when increasing the ZOOM value, since the frequency width of one pixel gets
+smaller. Another option would be to normalise the spectrum to one Hz, that is, to display the
+energy within an interval one Hz wide. While it would be easy to do so, the noise floor is then
+much lower of what one is used from other SDR programs and I wanted to avoid a new source of
+confusion.
+
+The S-meter reading, on the other hand, integrates the spectral energy density over the filter
+passband. For example, if your spectrum is 96 kHz wide but displayed in a window 800 pixels wide,
+then the width of one pixel is 120 Hz. If the spectrum shows a noise floor at -122 dBm, this means
+the energy density of the noise is $-122$ dBm per 120 Hz. The S-meter reading for a filter
+2400 Hz wide is then $-109$ dBm which is twenty times more energy than $-122$ dBm. Switching to
+a filter 5000 Hz wide increases the S-meter reading  to $-106$ dBm (a factor of two
+ is 3 dB).
+
+If you want to measure the noise floor and report or compare the result,
+the best you can do is to get an S-meter reading (in dBm) with
+a filter that is 1000 Hz wide, and then subtract 30 from the S-meter value to
+produce a noise floor figure in dBm/Hz.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 \section{Spectrum scope options}
 \label{sec:FillingGradient}
+
+\begin{figure}[ht]
+\center
+\includegraphics[scale=0.40]{ScopeFilling.png}
+\caption{Display options for the spectrum scope.}
+\label{fig:scopeoptions}
+\end{figure}
 
 You have already seen two different spectrum scopes: in the first
 picture, the  spectrum was a filled green area, while in the last
@@ -517,15 +555,9 @@ personal preference in the \bltt{Display} menu (see below). There
 are two options which you can enable or disable, such that there
 are four different outcomes. The first option is the ,,Filled'' option
 which discriminates between a line spectrum and a spectrum which is
-filled below the line. In the picture below, the first and third
+filled below the line. In Fig. \ref{fig:scopeoptions}, the first and third
 example have no filling, while the second and fourth spectrum
-are filled:
-
-\begin{figure}[ht]
-\center
-\includegraphics[scale=0.40]{ScopeFilling.png}
-\caption{Display options for the spectrum scope.}
-\end{figure}
+are filled.
 
 Then there is the ,,Gradient'' option. Without this option, the
 spectrum is displayed in white colour. With the gradient option,
@@ -542,11 +574,12 @@ is no gradient option.
 \section{Zoom and Pan}
 \label{sec:ZoomPanArea}
 
-\begin{figure}[ht]
+\begin{figure}[ht!]
 \center
 \includegraphics[scale=0.45]{ZoomPan.png}
 \caption{The spectrum scope of Fig. \ref{fig:SingleReceiver} with a
 large Zoom value.}
+\label{fig:zoom}
 \end{figure}
 
 The width of the RX spectrum equals the sample rate
@@ -557,27 +590,26 @@ of the spectrum than you are interested in. As a drawback,
 the part which is relevant to you may look a little bit
 compressed. This is where the \bltt{Zoom} command
 comes in. The zoom value can adopt integral values between
-1 (no zoom) and 8. In the latter case, only 1/8 of the
+1 (no zoom) and 32. In the latter case, only 1/32 of the
 overall spectrum is displayed on the screen. In the
 picture below, you see that the RX scope is only 12 kHz
-wide (which is 1/8 of the RX sample rate, 96 kHz in our
+wide (which is 1/8 of the RX sample rate, 1/8 of 96 kHz in our
 example). Note that what is displayed is in full resolution.
 Internally, a spectrum with 8 times the number of pixels
 of the screen width is created and only a part of it is
 displayed. The zoom value can be changed using the \rett{Zoom}
 slider (at the left edge below the RX panel).
 
-
-When using a zoom value larger than one, this means that
-a spectrum with more pixels than the actual screen width
-is produced. One can select which part of that area
-is displayed on the screen with the \rett{Pan} slider
-(below the RX panel at the right side). Normally (Zoom=1),
-the VFO dial frequency is exactly in the middle of the
-RX scope, and marked with a thin red line. On the picture
-above, the dial frequency (14.100 MHz) is found in the RX
-panel close to the left edge, and this has been done
-by moving the \rett{Pan} slider.
+When changing the zoom value, then the pan value is
+automatically adjusted such that the RX frequency
+(the CTUN frequency if CTUN is active) is at the
+centre of the display. In the example shown, the PAN
+sliders has been manually adjusted such that the signal
+at the RX frequency (14100 kHz) appears close to the left
+edge of the display. In my view, PAN makes little sense
+if not using CTUN. While it is possible to move the PAN
+slider when the zoom factor is unity, this simply has
+no effect.
 
 Note that the TX spectrum scope always has a fixed spectral
 width, namely 24 kHz in non-duplex mode when the TX spectrum
@@ -1276,12 +1308,18 @@ It is possible to change the OC settings in the \bltt{OC} menu, and these settin
 preferences. Upon next program start, however, these preferences will again be overwritten as long
 as the \texttt{N2ADR} filter board is chosen.
 
-\rett{VFO Encoder Divisor:} This option applies to VFO knobs in front panels, GPIO
+\rett{VFO Enc Div:} This option applies to VFO knobs in front panels, GPIO
 or MIDI controllers. In some cases, these encoders generate too many ticks per revolution,
 such that it is difficult to fine tune on a signal.
 If the VFO Encoder Divisor, as shown in the example, has a value of
 15, only every 15$^\textrm{th}$ tick will we processed. For the default value of 1,
 the divisor has no effect.
+
+\rett{VFO snap} If this box is checked, VFO frequency changes by clicking or dragging in the
+RX panadapter are finally rounded to the nearest multiple of the current VFO step size. This
+option is mostly meant for touch-screens which are usually not very accurate. Note that if
+this option is checked, you may not be able to exactly tune on a signal by clicking on
+it with a mouse.
 
 \rett{Split} Use this checkbox to enable/disable Split mode. In Split mode, the frequency of
 the non-active receiver (when using two receivers) or the frequency of VFO-B (when using one
@@ -4150,6 +4188,25 @@ stored in the local preferences file without encryption. The idea here is that y
 in a private environment, and against those who manage to hack your computer running the \pH server instance
 there is nothing one can do from within \pH.
 
+\rett{Server runs protocol only if client is connected}.
+ If this option is checked, the server halts
+the communication with the radio when it starts. It restarts the communication once a client is connected,
+and stop it when the client disconnects. This option has been implemented for a group of amateurs which
+run a remote radio hooked up with several computers running several SDR programs offering remote operation.
+
+Without this option, \pH would connect to and take over the radio when it starts, and then ,,occupies''
+the radio even if no client is connected. With this option checked, the radio can be operated by
+several SDR programs (not at the same time, of course). If the radio is available, \pH resumes
+data exchange with the radio once a client connects, and stops the protocol once the client disconnects,
+and then other amateurs using other SDR programs can use the radio.
+
+If the server is already running, and you want this option to become effective immediately,
+un-check and re-check the \rett{Server Enable} box. Choosing \rett{Restart} in the main menu
+will also resume radio operation.
+
+\textbf{Client/Server operation}
+
+Having explained the \bltt{Server} menu, we now discuss how to use the client/server feature.
 Let us assume you have a server instance of \pH running, so how to connect  to it from a  remote location?
 Here it is useful to show again the discovery menu on the \pH start screen (Fig. \ref{fig:clientmenu}):
 
@@ -4168,7 +4225,8 @@ host name. The port number must, of course, match the port number specified in t
 the \pH server instance (see above).
 
 In the \texttt{host:addr} pop-down menu, you can choose the entry matching your server. On a virgin system, this menu
-will  only show a default entry which is 127.0.0.1:50000, and an empty entry. By clicking into the text field, you
+will  only show a default entry which is 127.0.0.1:50000, as well as an additional empty entry.
+ By clicking into the text field, you
 can change an entry such that it matches for \pH server instance. You can also select the empty entry from
 the pop-down menu and enter a new \texttt{host:addr} pair, which will then be added to the list.
  The last element of
@@ -4185,17 +4243,16 @@ If clicking the \rett{Show} button, its label changes to \rett{Hide} and the pas
 might have guessed that clicking the \rett{Hide} button then conceals the password again and the button
 label reads \rett{Show} again.
 
-\clearpage
 \textbf{A note on network security:}
 
 The password you enter is \textbf{never ever} transmitted ``as is'' over the line. Instead, the server sends a random
 512 bit (64 byte) \textit{challenge} which is different for each connection.
-On the client side, a four-byte version number and the password is added
+On the client side,  the password is added
 to the challenge and a SHA512 key is built from the result.  Using the last result as the new challenge,
 this process is repeated 99999 times to make brute-force attacks compute intensive,
 and the last hash generated is then sent back to the server. The server
-does the same with its version number and the password entered in the \bltt{Server} menu and then asserts
-that the two SHA512 keys are identical.
+does the same with the password entered in the \bltt{Server} menu and then asserts
+that the SHA512 key thus generated matches the one received from the client.
 On a RaspberryPi5, generation of the hash takes about 120 msec, and about 3 times less on powerful desktop
 computers. Once a hacker has ``sniffed'' a valid challenge/hash pair, trying to guess the password
 from generating all possible hashes
@@ -4205,8 +4262,7 @@ passwords which also include upper-case letters are even better.
 Although this still  not  top-notch cyber security, it should be good enough
 to fulfil your  (legal) obligations as a radio amateur to prevent your gear from unlawful use.
 If you feel you must go beyond, one option is to set up a VPN \textit{virtual private network} in which
-you can have expert-level cyber security provided by your network infrastructure rather than by an application such
-as \pH.
+you can have expert-level cyber security provided by your network infrastructure.
 
 \textbf{Auto disconnect feature:}
 
@@ -4225,13 +4281,14 @@ at a sample rate of 48 kHz, in stereo for the RX audio (Server $\to$ Client) and
 microphone data (Client $\to$ server). During RX, and also during TX when doing CW, no TX microphone data
 is transferred. If not using duplex, no RX audio data is transferred when TXing because the receivers are shut down.
 
-This means that during RX, about 96 kByte/sec (768 kbit/sec) are transferred from the Server to the Client
-(twice as much if running two receivers), while only half of this is transferred from the Client to the Server during
+This means that during RX, about 192 kByte/s (1536 kbit/s) are transferred from the Server to the Client
+(twice as much if running two receivers), while 96 kByte/s (768 kbit/s)  are transferred
+from the Client to the Server during
 TX if doing SSB. When TXing in CW, very little data (the CW key-down/up time stamps) is actually sent from the client
 to the server.
 My first tests indicate that client/server operation works very well even
-if parts of the connection between Client and Server
-is using a WiFi. I mention this because my attempts using WiFi for connection to the \textit{radio}
+if  the connection between Client and Server
+involves WiFi. I mention this because my attempts using WiFi for connection to the \textit{radio}
 (that is, for the base band IQ data) were not entirely satisfactory.
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
@@ -5188,14 +5245,12 @@ is rarely used but offers Hz-resolution for the direct frequency entry.}
 
 \phcommand{PanZoom}{PAN}{E}{
 {\color{red} This command is connected to the \texttt{Pan} slider in the Zoom/Pan area.}
-Change the Pan value. This control is only effective when the Zoom value is larger
-than 1.}
+Change the Pan value. Note the PAN value has no effect if Zoom equals unity. The PAN value
+goes from 0 (show leftmost part) and 100 (show rightmost part of the spectrum).}
 
-\phcommand{Pan-}{PAN-}{B}{Decrease the PAN value by 100. This control is only effective when the Zoom value is
-larger than 1.}
+\phcommand{Pan-}{PAN-}{B}{Decrease the PAN value.}
 
-\phcommand{Pan+}{PAN+}{B}{Increase the PAN value by 100. This control is only effective when the Zoom value is
-larger than 1.}
+\phcommand{Pan+}{PAN+}{B}{Increase the PAN value.}
 
 \phcommand{Panadapter High}{PANH}{PE}{Change the dBm value (from -60 to +20) at the top of the spectrum scope
 of the active receiver. Values outside
@@ -5479,13 +5534,13 @@ the XIT+ button is released.}
 
 \phcommand{Zoom}{ZOOM}{PE}{
 {\color{red} This command is connected to the \texttt{Zoom} slider in the Zoom/Pan area.}
-Change the ZOOM value (1...8) of the active receiver.}
+Change the ZOOM value (1...32) of the active receiver.}
 
 \phcommand{Zoom -}{ZOOM-}{B}{Decrease the ZOOM value of the active receiver by one. If the ZOOM value was
 already 1, this is a no-op.}
 
 \phcommand{Zoom +}{ZOOM+}{B}{Increase the ZOOM value of the active receiver by one. If the ZOOM value was
-already 8, this is a no-op.}
+already 32, this is a no-op.}
 
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
 %%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%%
