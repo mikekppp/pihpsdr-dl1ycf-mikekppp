@@ -19,8 +19,6 @@
 
 #include <gtk/gtk.h>
 #include <math.h>
-#include <stdio.h>
-#include <stdlib.h>
 
 #include <wdsp.h>
 
@@ -70,6 +68,8 @@ static uint8_t cw_ring_state[CW_RING_SIZE];
 static int     cw_ring_wait[CW_RING_SIZE];
 static volatile int cw_ring_inpt = 0;
 static volatile int cw_ring_outpt = 0;
+static int keydown = 0;        // current state of key
+static int cw_delay_time = 0;  // time since last CW event
 
 
 double ctcss_frequencies[CTCSS_FREQUENCIES] = {
@@ -84,7 +84,7 @@ double ctcss_frequencies[CTCSS_FREQUENCIES] = {
 //
 static int p1local = 0, p2local = 0; // sine tone generator
 
-static gboolean close_cb() {
+static gboolean close_cb(void) {
   // there is nothing to clean up
   return TRUE;
 }
@@ -126,8 +126,8 @@ static int clear_out_of_band_warning(gpointer data) {
 // - the phase is always continuous, even if there are frequency jumps
 ///////////////////////////////////////////////////////////////////////////
 
-static float sine_generator(int *phase1, int *phase2, int freq) {
-  register float val, s, d;
+static double sine_generator(int *phase1, int *phase2, int freq) {
+  register double val, s, d;
   register int p1 = *phase1;
   register int p2 = *phase2;
   register int32_t f256 = freq * 256; // so we know 256*freq won't overflow
@@ -285,7 +285,7 @@ void tx_set_ramps(TRANSMITTER *tx) {
 void tx_reconfigure(TRANSMITTER *tx, int pixels, int width, int height) {
   if (width != tx->width || height != tx->height) {
     g_mutex_lock(&tx->display_mutex);
-    t_print("%s: width=%d height=%d\n", __FUNCTION__, width, height);
+    t_print("%s: width=%d height=%d\n", __func__, width, height);
     tx->width = width;
     tx->height = height;
     gtk_widget_set_size_request(tx->panel, width, height);
@@ -327,8 +327,10 @@ void tx_save_state(const TRANSMITTER *tx) {
   SetPropI1("transmitter.%d.panadapter_ignore_noise_percentile",  tx->id,    tx->panadapter_ignore_noise_percentile);
   SetPropI1("transmitter.%d.panadapter_hide_noise_filled",        tx->id,    tx->panadapter_hide_noise_filled);
   SetPropI1("transmitter.%d.panadapter_peaks_in_passband_filled", tx->id,    tx->panadapter_peaks_in_passband_filled);
-  SetPropI1("transmitter.%d.local_microphone",                    tx->id,    tx->local_microphone);
-  SetPropS1("transmitter.%d.microphone_name",                     tx->id,    tx->microphone_name);
+  SetPropI1("transmitter.%d.audiomonitor",                        tx->id,    tx->audiomonitor);
+  SetPropI1("transmitter.%d.local_audio",                         tx->id,    tx->local_audio);
+  SetPropI1("transmitter.%d.add_hpsdr_mic_samples",               tx->id,    tx->add_hpsdr_mic_samples);
+  SetPropS1("transmitter.%d.audio_name",                          tx->id,    tx->audio_name);
   SetPropI1("transmitter.%d.dialog_x",                            tx->id,    tx->dialog_x);
   SetPropI1("transmitter.%d.dialog_y",                            tx->id,    tx->dialog_y);
   SetPropI1("transmitter.%d.display_filled",                      tx->id,    tx->display_filled);
@@ -416,8 +418,13 @@ void tx_restore_state(TRANSMITTER *tx) {
   GetPropI1("transmitter.%d.panadapter_ignore_noise_percentile",  tx->id,    tx->panadapter_ignore_noise_percentile);
   GetPropI1("transmitter.%d.panadapter_hide_noise_filled",        tx->id,    tx->panadapter_hide_noise_filled);
   GetPropI1("transmitter.%d.panadapter_peaks_in_passband_filled", tx->id,    tx->panadapter_peaks_in_passband_filled);
-  GetPropI1("transmitter.%d.local_microphone",                    tx->id,    tx->local_microphone);
-  GetPropS1("transmitter.%d.microphone_name",                     tx->id,    tx->microphone_name);
+  // BACKWARDS: next two lines
+  GetPropI1("transmitter.%d.local_microphone",                    tx->id,    tx->local_audio);
+  GetPropS1("transmitter.%d.microphone_name",                     tx->id,    tx->audio_name);
+  GetPropI1("transmitter.%d.audiomonitor",                        tx->id,    tx->audiomonitor);
+  GetPropI1("transmitter.%d.local_audio",                         tx->id,    tx->local_audio);
+  GetPropI1("transmitter.%d.add_hpsdr_mic_samples",               tx->id,    tx->add_hpsdr_mic_samples);
+  GetPropS1("transmitter.%d.audio_name",                          tx->id,    tx->audio_name);
   GetPropI1("transmitter.%d.dialog_x",                            tx->id,    tx->dialog_x);
   GetPropI1("transmitter.%d.dialog_y",                            tx->id,    tx->dialog_y);
   GetPropI1("transmitter.%d.display_filled",                      tx->id,    tx->display_filled);
@@ -582,7 +589,6 @@ static gboolean tx_update_display(gpointer data) {
     case DEVICE_HERMES:
     case DEVICE_ANGELIA:
     case NEW_DEVICE_HERMES:
-    case NEW_DEVICE_HERMES2:
     case NEW_DEVICE_ANGELIA:
       constant1 = 3.3;
       constant2 = 0.095;
@@ -734,9 +740,15 @@ static gboolean tx_update_display(gpointer data) {
     if (tx->puresignal && tx->feedback) {
       RECEIVER *rx_feedback = receiver[PS_RX_FEEDBACK];
       g_mutex_lock(&rx_feedback->display_mutex);
-      rc = rx_get_pixels(rx_feedback);
+      rx_get_pixels(rx_feedback);
+      rc = rx_feedback->pixels_available;
 
       if (rc) {
+        //
+        // The number of pixels that we need to copy depends on the "duplex" state.
+        // If duplex, then there is a separate TX window that is narrower than
+        // the window size.
+        //
         int full  = rx_feedback->pixels;  // number of pixels in the feedback spectrum
         int width = tx->pixels;           // number of pixels to copy from the feedback spectrum
         int start = (full - width) / 2;   // Copy from start ... (end-1)
@@ -834,7 +846,7 @@ static void tx_create_visual(TRANSMITTER *tx) {
   //
   // This creates a panadapter within the main window
   //
-  t_print("%s: id=%d width=%d height=%d\n", __FUNCTION__, tx->id, tx->width, tx->height);
+  t_print("%s: id=%d width=%d height=%d\n", __func__, tx->id, tx->width, tx->height);
 
   if (tx->dialog != NULL) {
     gtk_widget_destroy(tx->dialog);
@@ -850,6 +862,11 @@ static void tx_create_visual(TRANSMITTER *tx) {
   }
 
   gtk_widget_show_all(tx->panel);
+  //
+  // Make a reference to tx->panel so we can  later
+  // remote it from "fixed" without getting destroyed
+  // and put/move it there later
+  //
   g_object_ref((gpointer)tx->panel);
 
   if (duplex) {
@@ -968,7 +985,7 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
   tx->displaying = 0;
   tx->antenna = 0; // default: ANT1
   t_print("%s: id=%d buffer_size=%d dsp_rate=%d iq_output_rate=%d output_samples=%d width=%d height=%d\n",
-          __FUNCTION__,
+          __func__,
           tx->id, tx->buffer_size, tx->dsp_rate, tx->iq_output_rate, tx->output_samples,
           tx->width, tx->height);
   tx->default_filter_low = 150;
@@ -1061,8 +1078,12 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
   tx->dexp_filter      =       0;
   tx->dexp_filter_low  =    1000;
   tx->dexp_filter_high =    2000;
-  tx->local_microphone = 0;
-  snprintf(tx->microphone_name, sizeof(tx->microphone_name), "%s", "NO MIC");
+  tx->local_audio = 0;
+  tx->add_hpsdr_mic_samples = 0;
+  tx->audiomonitor = 0;
+  tx->audio_flag = 0;
+  g_mutex_init(&tx->audio_mutex);
+  snprintf(tx->audio_name, sizeof(tx->audio_name), "%s", "NO AUDIO");
   tx->dialog_x = -1;
   tx->dialog_y = -1;
   tx->dialog = NULL;
@@ -1171,7 +1192,7 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
   //
   if (protocol == ORIGINAL_PROTOCOL) {
     // Note output_samples == buffer_size in P1
-    tx->p1stone = g_new(int, tx->output_samples);
+    tx->p1stone = g_new(double, tx->output_samples);
   } else {
     tx->p1stone = NULL;
   }
@@ -1210,7 +1231,7 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
               1.0,                   // antivox gain
               1.0);                  // antivox tau
   t_print("%s: OpenChannel id=%d buffer_size=%d dsp_size=%d fft_size=%d dspRate=%d outputRate=%d\n",
-          __FUNCTION__,
+          __func__,
           tx->id,
           tx->buffer_size,
           tx->dsp_size,
@@ -1272,8 +1293,210 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
     tx_ps_setparams(tx);
   }
 
+  if (tx->local_audio) {
+    if (audio_open_input(tx) < 0) {
+      t_print("%s: audio_open_input failed\n", __func__);
+      tx->local_audio = 0;
+    }
+  }
+
   return tx;
 }
+
+//////////////////////////////////////////////////////////////////////////
+//
+// CW side tone:
+// This function returns the next sample of a CW side tone.
+// Unless run in the client, it also generates the shape of the RF
+// pulse in tx->cw_sig_rf()
+//
+//////////////////////////////////////////////////////////////////////////
+
+static double next_cw_sidetone_sample(TRANSMITTER *tx, int rfpos) {
+  double sample = 0.0;
+  //
+  // shape CW pulses when doing CW and transmitting, else nullify them
+  //
+
+  //
+  //  We HAVE TO shape the signal to avoid hard clicks to be
+  //  heard way beside our frequency. The envelope (ramp function)
+  //  is stored in cw_ramp_rf[0::cw_ramp_rf_len], so we "move" the
+  //  pointer cw_ramp_rf_ptr between the edges.
+  //
+  //  In the same way, cw_ramp_audio, cw_ramp_audio_len,
+  //  and cw_ramp_audio_ptr are used to shape the envelope of
+  //  the side tone pulse.
+  //
+  //  Note that usually, the pulse is much broader than the ramp,
+  //  that is, cw_key_down and cw_key_up are much larger than
+  //  the ramp length.
+  //
+  //  We arrive here once per microphone sample. This means, that
+  //  we have to produce tx->ratio RF samples and one sidetone
+  //  sample.
+  //
+  if (keydown && cw_delay_time > 960000) {
+    //
+    // hardware protection: key-down since more than 20 seconds
+    // so do key-up
+    //
+    keydown = 0;
+  }
+
+  if (cw_ring_inpt != cw_ring_outpt) {
+    //
+    // There is data in the ring buffer. An "event" is a pair
+    // (wait, state) of values, where wait indicates the time
+    // (in 1/48000 sec) one has to wait since the previous
+    // event, and state indicated key-down/up
+    //
+    if (cw_delay_time >= cw_ring_wait[cw_ring_outpt]) {
+      //
+      // Next event ready to be executed
+      //
+      cw_delay_time = 0;
+      keydown = cw_ring_state[cw_ring_outpt];
+      int newpt = cw_ring_outpt + 1;
+
+      if (newpt >= CW_RING_SIZE) { newpt -= CW_RING_SIZE; }
+
+      MEMORY_BARRIER;
+      cw_ring_outpt = newpt;
+    }
+  }
+
+  //
+  // Shape RF pulse and side tone.
+  //
+
+  if (g_mutex_trylock(&tx->cw_ramp_mutex)) {
+    double val;
+
+    if (keydown) {
+      if (tx->cw_ramp_audio_ptr < tx->cw_ramp_audio_len) {
+        tx->cw_ramp_audio_ptr++;
+      }
+
+      val = tx->cw_ramp_audio[tx->cw_ramp_audio_ptr];
+
+      if (!radio_is_remote) {
+        for (int i = 0; i < tx->ratio; i++) {
+          if (tx->cw_ramp_rf_ptr < tx->cw_ramp_rf_len) {
+            tx->cw_ramp_rf_ptr++;
+          }
+
+          tx->cw_sig_rf[rfpos++] = tx->cw_ramp_rf[tx->cw_ramp_rf_ptr];
+        }
+      }
+    } else {
+      if (tx->cw_ramp_audio_ptr > 0) {
+        tx->cw_ramp_audio_ptr--;
+      }
+
+      val = tx->cw_ramp_audio[tx->cw_ramp_audio_ptr];
+
+      if (!radio_is_remote) {
+        for (int i = 0; i < tx->ratio; i++) {
+          if (tx->cw_ramp_rf_ptr > 0) {
+            tx->cw_ramp_rf_ptr--;
+          }
+
+          tx->cw_sig_rf[rfpos++] = tx->cw_ramp_rf[tx->cw_ramp_rf_ptr];
+        }
+      }
+    }
+    g_mutex_unlock(&tx->cw_ramp_mutex);
+
+    int vol = cw_keyer_sidetone_volume;
+
+    // Apply a minimum side tone volume for CAT CW messages.
+    if (vol == 0 && CAT_cw_is_active) { vol = 12; }
+
+    //
+    // The built-in CW side tone of the ANAN-7000 corresponds to an amplitude of 0.25
+    // when cw_keyer_sidetone_volume is at its maximum value (127). On the G2, the
+    // amplitude can go up to full scale.
+    // Here we take care that in the headphone connected to the radio, the CW side tone
+    // generated by piHPSDR has the same volume as when producing the side tone in the
+    // radio FPGA, for a given setting of the side tone volume.
+    //
+    if (device == NEW_DEVICE_SATURN) {
+      // max amplitude 0.998
+      sample = 0.00786 * vol * val * sine_generator(&p1local, &p2local, cw_keyer_sidetone_frequency);
+    } else {
+      // max amplitude 0.249
+      sample = 0.00196 * vol * val * sine_generator(&p1local, &p2local, cw_keyer_sidetone_frequency);
+    }
+  } // trylock
+  return sample;
+}
+
+//////////////////////////////////////////////////////////////////////////
+//
+// Client/server:
+// sidetone_thread is started once and forever in the client to produce
+// a CW sidetone. The material is essentially copied from tx_add_mic_sample(),
+// but we need an internal clock, that is, we ship out 96 samples every
+// 2.00 milli-seconds while transmitting without duplex.
+//
+//////////////////////////////////////////////////////////////////////////
+
+#define NSEC_PER_SEC 1000000000L
+
+gpointer client_sidetone_thread(gpointer arg) {
+  TRANSMITTER *tx = (TRANSMITTER *) arg;
+  struct timespec ts;
+
+  //
+  // Do everything done in create_transmitter that we need to produce a side tone
+  //
+  t_print("%s: starting.\n", __func__);
+  g_mutex_init(&tx->cw_ramp_mutex);
+  tx->cw_ramp_audio = NULL;
+  tx->cw_ramp_rf    = NULL;
+  tx_set_ramps(tx);
+
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+
+  for (;;) {
+    int txmode = vfo_get_tx_mode();
+    if (radio_is_transmitting() && (txmode == modeCWL || txmode == modeCWU)) {
+      // ship out 96 audio samples, possibly with side tone
+      for (int i = 0; i < 96; i++) {
+        double sample;
+
+        if (cw_delay_time < 999999) {
+          cw_delay_time++;
+        }
+
+        sample = next_cw_sidetone_sample(tx, 0);
+
+        if (active_receiver->local_audio && !duplex) {
+          tx_audio_write(active_receiver, sample);
+        }
+      }
+    } else {
+      // reset CW buffer and pulse shaper
+      keydown = 0;
+      cw_ring_inpt = cw_ring_outpt = 0;
+      tx->cw_ramp_audio_ptr = 0;
+      tx->cw_ramp_rf_ptr = 0;
+    }
+
+    ts.tv_nsec += 2000000;  // 2 milli seconds
+
+    while (ts.tv_nsec >= NSEC_PER_SEC) {
+      ts.tv_nsec -= NSEC_PER_SEC;
+      ts.tv_sec++;
+    }
+
+    clock_nanosleep(CLOCK_MONOTONIC, TIMER_ABSTIME, &ts, NULL);
+  }
+
+  return NULL;  // NOTREACHED
+}
+
 
 //////////////////////////////////////////////////////////////////////////
 //
@@ -1284,9 +1507,6 @@ TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int height) {
 
 static void tx_full_buffer(TRANSMITTER *tx) {
   ASSERT_SERVER();
-  long isample;
-  long qsample;
-  double gain;
   double *dp;
   int j;
   int error;
@@ -1297,22 +1517,6 @@ static void tx_full_buffer(TRANSMITTER *tx) {
   // cwmode only valid in the old protocol, in the new protocol we use a different mechanism
   int txmode = vfo_get_tx_mode();
   cwmode = (txmode == modeCWL || txmode == modeCWU) && !tx->tune && !tx->twotone;
-
-  switch (protocol) {
-  case ORIGINAL_PROTOCOL:
-    gain = 32767.0; // 16 bit
-    break;
-
-  case NEW_PROTOCOL:
-    gain = 8388607.0; // 24 bit
-    break;
-
-  case SOAPYSDR_PROTOCOL:
-  default:
-    // gain is not used, since samples are floating point
-    gain = 1.0;
-    break;
-  }
 
   if (cwmode) {
     //
@@ -1397,7 +1601,7 @@ static void tx_full_buffer(TRANSMITTER *tx) {
     fexchange0(tx->id, tx->mic_input_buffer, tx->iq_output_buffer, &error);
 
     if (error != 0) {
-      t_print("%s: id=%d fexchange0: error=%d\n", __FUNCTION__, tx->id, error);
+      t_print("%s: id=%d fexchange0: error=%d\n", __func__, tx->id, error);
     }
   }
 
@@ -1408,8 +1612,10 @@ static void tx_full_buffer(TRANSMITTER *tx) {
   }
 
   if (radio_is_transmitting()) {
+    double gain = 1.0;
+    double ggain;
     if (tx->do_scale) {
-      gain = gain * tx->drive_scale;
+      gain = tx->drive_scale;
     }
 
     if (txflag == 0 && protocol == NEW_PROTOCOL) {
@@ -1420,7 +1626,7 @@ static void tx_full_buffer(TRANSMITTER *tx) {
       // a little late.
       //
       for (j = 0; j < 1024; j++) {
-        new_protocol_iq_samples(0, 0);
+        new_protocol_iq_samples(0.0, 0.0);
       }
     }
 
@@ -1454,9 +1660,8 @@ static void tx_full_buffer(TRANSMITTER *tx) {
         // that the amplitude of the pulse is in I (in the range 0.0 - 1.0)
         // and Q should be zero
         for (j = 0; j < tx->output_samples; j++) {
-          double ramp = tx->cw_sig_rf[j];       // between 0.0 and 1.0
-          isample = floor(gain * ramp + 0.5);   // always non-negative, isample is just the pulse envelope
-          old_protocol_iq_samples(isample, 0, tx->p1stone[j]);
+          double isample = gain * tx->cw_sig_rf[j];
+          old_protocol_iq_samples(isample, 0.0, tx->p1stone[j]);
         }
       }
       break;
@@ -1472,9 +1677,9 @@ static void tx_full_buffer(TRANSMITTER *tx) {
         //
         // This is why we apply the factor 0.896 HERE.
         //
+        ggain = 0.896 * gain;
         for (j = 0; j < tx->output_samples; j++) {
-          double ramp = tx->cw_sig_rf[j];                  // between 0.0 and 1.0
-          isample = floor(0.896 * gain * ramp + 0.5);      // always non-negative, isample is just the pulse envelope
+          double isample = ggain * tx->cw_sig_rf[j];       // between 0.0 and 0.896
           new_protocol_iq_samples(isample, 0);
         }
 
@@ -1488,7 +1693,10 @@ static void tx_full_buffer(TRANSMITTER *tx) {
         //
         for (j = 0; j < tx->output_samples; j++) {
 #ifdef SOAPYSDR
-          soapy_protocol_iq_samples(0.0F, (float)tx->cw_sig_rf[j]);     // SOAPY: just convert double to float
+          // conversion from the native WDSP (double,double) format to
+          // the radio format is done within the soapy layer
+          double isample = gain * tx->cw_sig_rf[j];
+          soapy_protocol_iq_samples(isample, 0.0);
 #endif
         }
 
@@ -1499,11 +1707,8 @@ static void tx_full_buffer(TRANSMITTER *tx) {
       // Original code without pulse shaping and without side tone
       //
       for (j = 0; j < tx->output_samples; j++) {
-        double is, qs;
-        is = tx->iq_output_buffer[j * 2];
-        qs = tx->iq_output_buffer[(j * 2) + 1];
-        isample = is >= 0.0 ? (long)floor(is * gain + 0.5) : (long)ceil(is * gain - 0.5);
-        qsample = qs >= 0.0 ? (long)floor(qs * gain + 0.5) : (long)ceil(qs * gain - 0.5);
+        double isample = gain * tx->iq_output_buffer[j * 2];
+        double qsample = gain * tx->iq_output_buffer[(j * 2) + 1];
 
         switch (protocol) {
         case ORIGINAL_PROTOCOL:
@@ -1519,9 +1724,10 @@ static void tx_full_buffer(TRANSMITTER *tx) {
           break;
 
         case SOAPYSDR_PROTOCOL:
-          // SOAPY: just convert the double IQ samples (is,qs) to float.
 #ifdef SOAPYSDR
-          soapy_protocol_iq_samples((float)is, (float)qs);
+          // conversion from the native WDSP (double,double) format to
+          // the radio format is done within the soapy layer
+          soapy_protocol_iq_samples(isample, qsample);
 #endif
           break;
         }
@@ -1550,13 +1756,13 @@ static void tx_full_buffer(TRANSMITTER *tx) {
 
 void tx_queue_cw_event(int down, int wait) {
   if (radio_is_remote) {
-    send_cw(client_socket, down, wait);
-    return;
+    send_cw(cl_sock_tcp, down, wait);
   }
 
   //
   // Put a CW event into the ring buffer
   // If buffer is nearly full, only queue key-up events
+  // Do this also in the client (side tone generation)
   //
   int num, newpt;
 
@@ -1577,50 +1783,47 @@ void tx_queue_cw_event(int down, int wait) {
     MEMORY_BARRIER;
     cw_ring_inpt = newpt;
   } else {
-    t_print("%s: WARNING: CW ring buffer full.\n", __FUNCTION__);
+    t_print("%s: WARNING: CW ring buffer full.\n", __func__);
   }
 }
 
-void tx_add_mic_sample(TRANSMITTER *tx, short next_mic_sample) {
+void tx_add_mic_sample(TRANSMITTER *tx, double mic_sample) {
   ASSERT_SERVER();
   int txmode = vfo_get_tx_mode();
-  double mic_sample_double;
-  static int keydown = 0;   // 1: key-down, 0: key-up
-  int i, j;
-  mic_sample_double = (double)next_mic_sample * 0.00003051;  // divide by 32768
 
-  //
-  // If we have local tx microphone, we normally *replace* the sample by data
-  // from the sound card. However, if PTT comes from  the radio, we  *add* both
-  // radio and sound card samples.
-  // This "trick" allows us to switch between SSB (with microphone attached to the
-  // radio) and DIGI (using a virtual audio cable) without going to the TX  menu.
-  //
-  if (tx->local_microphone) {
-    if (radio_ptt) {
-      mic_sample_double += audio_get_next_mic_sample();
+  if (tx->local_audio) {
+    //
+    // ADD HPSDR MIC SAMPLES option:
+    // As long as the PTT line *from* the (HPSDR) radio is active, add the mic_sample
+    // (which comes from the radio) to the sample from the sound card.
+    // The main use of this feature is to use a microphone attached to the
+    // radio together with a voice keyer delivering audio data via a
+    // sound card or a virtual audio cable.
+    //
+    if (hpsdr_ptt && tx->add_hpsdr_mic_samples) {
+      mic_sample += audio_get_next_mic_sample(tx);
     } else {
-      mic_sample_double = audio_get_next_mic_sample();
+      mic_sample = audio_get_next_mic_sample(tx);
     }
   }
 
   //
-  // If we have a client, it overwrites 'local' microphone data.
+  // If we have a client, it overwrites 'local' audio data.
   //
   if (remoteclient.running) {
-    mic_sample_double = remote_get_mic_sample() * 0.00003051;  // divide by 32768;
+    mic_sample = remote_get_mic_sample();
   }
 
-  // If there is captured data to re-play, replace incoming
+  // If there is captured data to transmit, replace incoming
   // mic samples by captured data.
   //
-  if (capture_state == CAP_REPLAY) {
+  if (capture_state == CAP_XMIT) {
     if (capture_replay_pointer < capture_record_pointer) {
-      mic_sample_double = capture_data[capture_replay_pointer++];
+      mic_sample = capture_data[capture_replay_pointer++];
     } else {
       // switching the state to REPLAY_DONE takes care that the
       // CAPTURE switch is "pressed" only once
-      capture_state = CAP_REPLAY_DONE;
+      capture_state = CAP_XMIT_DONE;
       schedule_action(CAPTURE, PRESSED, 0);
     }
   }
@@ -1631,33 +1834,54 @@ void tx_add_mic_sample(TRANSMITTER *tx, short next_mic_sample) {
   // (perhaps not really necessary, but can do no harm)
   //
   if (tx->tune || txmode == modeCWL || txmode == modeCWU) {
-    mic_sample_double = 0.0;
+    mic_sample = 0.0;
   }
 
-  tx->mic_input_buffer[tx->samples * 2] = mic_sample_double;
+  tx->mic_input_buffer[tx->samples * 2] = mic_sample;
   tx->mic_input_buffer[(tx->samples * 2) + 1] = 0.0;
   //
   //  CW events are obtained from a ring buffer. The variable
   //  cw_delay_time measures the time since the last CW event
-  //  (key-up or key-down). For QRS, it is increased up to
-  //  a maximum value of It is increased up do a maximum value
-  //  of 99999 (21 seconds). To protect the hardware, a
-  //  key-down is canceled at 960000 (20 seconds) anyway.
+  //  (key-up or key-down). To support  QRS, it is increased
+  //  up to a maximum value of 999999 (21 seconds).
+  //  To protect the hardware, a key-down is canceled after
+  //  960000 (20 seconds) anyway.
   //
-  static int cw_delay_time = 0;
 
-  if (cw_delay_time < 9999999) {
+  if (cw_delay_time < 999999) {
     cw_delay_time++;
   }
 
-  int xmit = radio_is_transmitting();
+  int rfpos = tx->ratio * tx->samples; // pointer into cw_rf_sig
 
-  if (xmit && tx->tune && tx->swrtune && g_mutex_trylock(&tx->cw_ramp_mutex)) {
+  for (int i = 0; i < tx->ratio; i++) {
+    tx->cw_sig_rf[rfpos+i] = 0.0;
+  }
+
+  if (protocol == ORIGINAL_PROTOCOL) {
+    tx->p1stone[tx->samples] = 0.0;
+  }
+
+  int xmit = radio_is_transmitting();
+  int can_tx_audio = xmit && !duplex;
+  int did_tx_audio = 0;
+  double tx_audio_sample = 0.0;
+
+  if (can_tx_audio && transmitter->audiomonitor ) {
+    //
+    // Apply volume setting of active receiver
+    //
+    double vol = pow(10.0, 0.05*active_receiver -> volume);
+    if (vol > 0.25) vol = 0.25;
+    tx_audio_sample = mic_sample * vol;
+    did_tx_audio = 1;
+  }
+
+  if (can_tx_audio && tx->tune && tx->swrtune && g_mutex_trylock(&tx->cw_ramp_mutex)) {
     //
     // produce a string of tones whose pitch and speed indicates the SWR
     //
     static int c1 = 0;
-    float swrsample;
     double val;
     int swrfreq = 500 + (int) (tx->swr * tx->swr * 100.0);
 
@@ -1684,7 +1908,7 @@ void tx_add_mic_sample(TRANSMITTER *tx, short next_mic_sample) {
       c1 += 30;
     }
 
-    swrsample = tx->swrtune_volume * sine_generator(&p1local, &p2local, swrfreq);
+    tx_audio_sample = tx->swrtune_volume * sine_generator(&p1local, &p2local, swrfreq);
 
     if (c1 < 72000) {
       // "keydown"
@@ -1707,208 +1931,43 @@ void tx_add_mic_sample(TRANSMITTER *tx, short next_mic_sample) {
       if (c2 >= 2400) { c1 = c2 = 0; }
     }
 
-    swrsample *= val;
+    tx_audio_sample *= val;
     g_mutex_unlock(&tx->cw_ramp_mutex);
-    int s = (int) (swrsample * 32767.0);
-
-    switch (protocol) {
-    case ORIGINAL_PROTOCOL:
-      tx->p1stone[tx->samples] = s;
-      break;
-
-    case NEW_PROTOCOL:
-      new_protocol_cw_audio_samples(s, s);
-      break;
-
-    default:
-      // do nothing
-      break;
-    }
-
-    if (active_receiver->local_audio) {
-      cw_audio_write(active_receiver, swrsample);
-    }
-  } else if ((txmode == modeCWL || txmode == modeCWU) && xmit) {
+    did_tx_audio = 1;
+  } else if (xmit && (txmode == modeCWL || txmode == modeCWU)) {
     //
-    // shape CW pulses when doing CW and transmitting, else nullify them
+    // despite its name, next_cw_sidetone_sample() also places the
+    // RF pulse shape into tx->cw_sig_rf[].
     //
-    float cwsample;
-
-    //
-    //  We HAVE TO shape the signal to avoid hard clicks to be
-    //  heard way beside our frequency. The envelope (ramp function)
-    //  is stored in cw_ramp_rf[0::cw_ramp_rf_len], so we "move" the
-    //  pointer cw_ramp_rf_ptr between the edges.
-    //
-    //  In the same way, cw_ramp_audio, cw_ramp_audio_len,
-    //  and cw_ramp_audio_ptr are used to shape the envelope of
-    //  the side tone pulse.
-    //
-    //  Note that usually, the pulse is much broader than the ramp,
-    //  that is, cw_key_down and cw_key_up are much larger than
-    //  the ramp length.
-    //
-    //  We arrive here once per microphone sample. This means, that
-    //  we have to produce tx->ratio RF samples and one sidetone
-    //  sample.
-    //
-    if (keydown && cw_delay_time > 960000) {
-      keydown = 0;
-    }
-
-    if (cw_ring_inpt != cw_ring_outpt) {
-      //
-      // There is data in the ring buffer
-      //
-      if (cw_delay_time >= cw_ring_wait[cw_ring_outpt]) {
-        //
-        // Next event ready to be executed
-        //
-        cw_delay_time = 0;
-        keydown = cw_ring_state[cw_ring_outpt];
-        int newpt = cw_ring_outpt + 1;
-
-        if (newpt >= CW_RING_SIZE) { newpt -= CW_RING_SIZE; }
-
-        MEMORY_BARRIER;
-        cw_ring_outpt = newpt;
-      }
-    }
-
-    //
-    // Shape RF pulse and side tone.
-    //
-    j = tx->ratio * tx->samples; // pointer into cw_rf_sig
-
-    if (g_mutex_trylock(&tx->cw_ramp_mutex)) {
-      double val;
-
-      if (keydown) {
-        if (tx->cw_ramp_audio_ptr < tx->cw_ramp_audio_len) {
-          tx->cw_ramp_audio_ptr++;
-        }
-
-        val = tx->cw_ramp_audio[tx->cw_ramp_audio_ptr];
-
-        for (i = 0; i < tx->ratio; i++) {
-          if (tx->cw_ramp_rf_ptr < tx->cw_ramp_rf_len) {
-            tx->cw_ramp_rf_ptr++;
-          }
-
-          tx->cw_sig_rf[j++] = tx->cw_ramp_rf[tx->cw_ramp_rf_ptr];
-        }
-      } else {
-        if (tx->cw_ramp_audio_ptr > 0) {
-          tx->cw_ramp_audio_ptr--;
-        }
-
-        val = tx->cw_ramp_audio[tx->cw_ramp_audio_ptr];
-
-        for (i = 0; i < tx->ratio; i++) {
-          if (tx->cw_ramp_rf_ptr > 0) {
-            tx->cw_ramp_rf_ptr--;
-          }
-
-          tx->cw_sig_rf[j++] = tx->cw_ramp_rf[tx->cw_ramp_rf_ptr];
-        }
-      }
-
-      // Apply a minimum side tone volume for CAT CW messages.
-      int vol = cw_keyer_sidetone_volume;
-
-      if (vol == 0 && CAT_cw_is_active) { vol = 12; }
-
-      cwsample = 0.00196 * vol * val * sine_generator(&p1local, &p2local, cw_keyer_sidetone_frequency);
-      g_mutex_unlock(&tx->cw_ramp_mutex);
-    } else {
-      //
-      // We did not get the "Ramp Lock".
-      // This can only happen if the CW ramp width is changed while transmitting
-      // (if changing the ramp width is enabled in the CW menu).
-      // Simply insert a "hard zero".
-      //
-      cwsample = 0.0;
-
-      for (i = 0; i < tx->ratio; i++) {
-        tx->cw_sig_rf[j++] = 0.0;
-      }
-    }
-
-    //
-    // cw_keyer_sidetone_volume is in the range 0...127 so cwsample is 0.00 ... 0.25
-    //
-    if (active_receiver->local_audio) {
-      cw_audio_write(active_receiver, cwsample);
-    }
-
-    //
-    // In the new protocol, we MUST maintain a constant flow of audio samples to the radio
-    // (at least for ANAN-200D and ANAN-7000 internal side tone generation)
-    // So we send a sidetone which is "silence" when doing "internal" CW.
-    //
-    // Note the cwsample amplitude is in the range 0 ... 0.25 for
-    // a "side tone level" between 0 and 127
-    //
-
-    if (cw_keyer_internal &&  !CAT_cw_is_active) {
-      cwsample = 0.0;  // Is this needed?
-    }
-
-    switch (protocol) {
-    case NEW_PROTOCOL: {
-      int s;
-
-      //
-      // The scaling should ensure that a piHPSDR-generated side tone
-      // has the same volume than a FGPA-generated one.
-      //
-      if (device == NEW_DEVICE_SATURN) {
-        //
-        // This comes from an analysis of the G2 sidetone
-        // data path:
-        // level 0...127 ==> amplitude 0...32767
-        //
-        s = (int) (cwsample * 131000.0);
-      } else {
-        //
-        // This factor has been measured on my ANAN-7000 and implies
-        // level 0...127 ==> amplitude 0...8191
-        //
-        s = (int) (cwsample * 32767.0);
-      }
-
-      new_protocol_cw_audio_samples(s, s);
-      break;
-
-      case ORIGINAL_PROTOCOL:
-        //
-        // For P1, we must store the side tone samples since they
-        // are tied in the protocol to the TXIQ samples.
-        // The scaling is valid for my RedPitaya-based HAMlab,
-        // I do not know which one is best for other P1 radios.
-        //
-        tx->p1stone[tx->samples] = (int) (cwsample * 32767.0);
-        break;
-      }
-    }
+    tx_audio_sample = next_cw_sidetone_sample(tx, rfpos);
+    if (!duplex) { did_tx_audio = 1; }
   } else {
-    //
-    //  If no longer transmitting, or no longer doing CW: reset pulse shaper.
-    //  This will also swallow any pending CW and wipe out the buffers
-    //
-    keydown = 0;
-    cw_ring_inpt = cw_ring_outpt = 0;
-    tx->cw_ramp_audio_ptr = 0;
-    tx->cw_ramp_rf_ptr = 0;
-    // insert "silence" in CW audio and TX IQ buffers
-    j = tx->ratio * tx->samples;
+   //
+   //  If no longer tuning or transmitting in CW: reset pulse shaper
+   //
+   keydown = 0;
+   cw_ring_inpt = cw_ring_outpt = 0;
+   tx->cw_ramp_audio_ptr = 0;
+   tx->cw_ramp_rf_ptr = 0;
+  }
 
-    if (protocol == ORIGINAL_PROTOCOL) {
-      tx->p1stone[j] = 0;
+  if (did_tx_audio) {
+    if (active_receiver->local_audio) {
+      tx_audio_write(active_receiver, tx_audio_sample);
     }
 
-    for (i = 0; i < tx->ratio; i++) {
-      tx->cw_sig_rf[j++] = 0.0;
+    switch (protocol) {
+    case NEW_PROTOCOL:
+      new_protocol_tx_audio_samples(tx_audio_sample);
+      break;
+
+    case ORIGINAL_PROTOCOL:
+      //
+      // For P1, we must store the side tone samples since they
+      // are tied in the protocol to the TXIQ samples.
+      //
+      tx->p1stone[tx->samples] = tx_audio_sample;
+      break;
     }
   }
 
@@ -1963,7 +2022,7 @@ void tx_add_ps_iq_samples(const TRANSMITTER *tx, double i_sample_tx, double q_sa
         if (rxval > rxmax) { rxmax = rxval; }
       }
 
-      t_print("%s: SetPk MEASURED: %f RX FeedBk Level: %f\n", __FUNCTION__, sqrt(pkmax), sqrt(rxmax));
+      t_print("%s: SetPk MEASURED: %f RX FeedBk Level: %f\n", __func__, sqrt(pkmax), sqrt(rxmax));
 #endif
 
       if (!cwmode) {
@@ -1984,28 +2043,6 @@ void tx_add_ps_iq_samples(const TRANSMITTER *tx, double i_sample_tx, double q_sa
     rx_feedback->samples = 0;
     tx_feedback->samples = 0;
   }
-}
-
-int tx_remote_update_display(gpointer data) {
-  TRANSMITTER *tx = (TRANSMITTER *) data;
-
-  if (tx->displaying) {
-    if (tx->pixels > 0) {
-      g_mutex_lock(&tx->display_mutex);
-
-      if (tx->display_panadapter) {
-        tx_panadapter_update(tx);
-      }
-
-      g_mutex_unlock(&tx->display_mutex);
-
-      if (!duplex) {
-        meter_update(active_receiver, POWER, tx->fwd, tx->alc, tx->swr);
-      }
-    }
-  }
-
-  return G_SOURCE_REMOVE;
 }
 
 void tx_create_remote(TRANSMITTER *tx) {
@@ -2037,7 +2074,7 @@ void tx_set_displaying(TRANSMITTER *tx) {
 
 void tx_set_filter(TRANSMITTER *tx) {
   if (radio_is_remote) {
-    send_txfilter(client_socket);
+    send_txfilter(cl_sock_tcp);
     return;
   }
 
@@ -2172,7 +2209,7 @@ void tx_create_analyzer(const TRANSMITTER *tx) {
   XCreateAnalyzer(tx->id, &rc, 262144, 1, 1, NULL);
 
   if (rc != 0) {
-    t_print("%s: CreateAnalyzer failed for TXid=%d\n", __FUNCTION__, tx->id);
+    t_print("%s: CreateAnalyzer failed for TXid=%d\n", __func__, tx->id);
   } else {
     tx_set_analyzer(tx);
   }
@@ -2263,7 +2300,7 @@ void tx_set_analyzer(const TRANSMITTER *tx) {
   int max_w = afft_size + (int) min(keep_time * (double) tx->iq_output_rate,
                                     keep_time * (double) afft_size * (double) tx->fps);
   overlap = (int)max(0.0, ceil(afft_size - (double)tx->iq_output_rate / (double)tx->fps));
-  t_print("%s: fft_size=%d overlap=%d pixels=%d\n", __FUNCTION__, afft_size, overlap, tx->pixels);
+  t_print("%s: fft_size=%d overlap=%d pixels=%d\n", __func__, afft_size, overlap, tx->pixels);
   SetAnalyzer(tx->id,                // id of the TXA channel
               n_pixout,              // 1 = "use same data for scope and waterfall"
               spur_elimination_ffts, // 1 = "no spur elimination"
@@ -2290,61 +2327,12 @@ void tx_off(const TRANSMITTER *tx) {
   ASSERT_SERVER();
   // switch TX OFF, wait until slew-down completed
   SetChannelState(tx->id, 0, 1);
-#ifdef SOAPYSDR
-
-  if (have_lime) {
-    //
-    // LIME: set TX gain to zero,
-    // disconnect antenna,
-    // execute TRX relay,
-    // set RX gains to nominal value
-    //
-    soapy_protocol_set_tx_gain(0);
-    soapy_protocol_set_tx_antenna(0); // 0 is NONE
-    const char *bank = "MAIN"; //set GPIO to signal the relay to RX
-    t_print("%s: Setting LIME GPIO to 0\n", __FUNCTION__);
-    SoapySDRDevice *sdr = get_soapy_device();
-    SoapySDRDevice_writeGPIODir(sdr, bank, 0xFF);
-    SoapySDRDevice_writeGPIO(sdr, bank, 0x00);
-
-    for (int i = 0; i < RECEIVERS; i++) {
-      soapy_protocol_rx_unattenuate(i);
-    }
-  }
-
-#endif
 }
 
 void tx_on(const TRANSMITTER *tx) {
   ASSERT_SERVER();
   // switch TX ON
   SetChannelState(tx->id, 1, 0);
-#ifdef SOAPYSDR
-
-  if (have_lime) {
-    //
-    // LIME: "mute" receivers if not running duplex,
-    // execute TRX relay via GPIO,
-    // connect TX antenna,
-    // set nominal TX drive
-    //
-    if (!duplex) {
-      for (int i = 0; i < RECEIVERS; i++) {
-        soapy_protocol_rx_attenuate(i);
-      }
-    }
-
-    SoapySDRDevice *sdr = get_soapy_device();
-    const char *bank = "MAIN";
-    t_print("%s: Setting LIME GPIO to 1\n", __FUNCTION__);
-    SoapySDRDevice_writeGPIODir(sdr, bank, 0xFF);
-    SoapySDRDevice_writeGPIO(sdr, bank, 0x01);
-    usleep(30000);
-    soapy_protocol_set_tx_antenna(tx->antenna);
-    soapy_protocol_set_tx_gain(tx->drive);
-  }
-
-#endif
 }
 
 void tx_ps_getinfo(TRANSMITTER *tx) {
@@ -2356,12 +2344,6 @@ void tx_ps_getinfo(TRANSMITTER *tx) {
 void tx_ps_getmx(TRANSMITTER *tx) {
   ASSERT_SERVER();
   GetPSMaxTX(tx->id, &tx->ps_getmx);
-}
-
-// cppcheck-suppress constParameterPointer
-void tx_ps_getpk(TRANSMITTER *tx) {
-  ASSERT_SERVER();
-  GetPSHWPeak(tx->id, &tx->ps_getpk);
 }
 
 void tx_ps_mox(const TRANSMITTER *tx, int state) {
@@ -2399,7 +2381,7 @@ void tx_ps_onoff(TRANSMITTER *tx, int state) {
   //
   if (radio_is_remote) {
     tx->puresignal = state;
-    send_psonoff(client_socket, state);
+    send_psonoff(cl_sock_tcp, state);
     g_idle_add(ext_vfo_update, NULL);
     return;
   }
@@ -2415,7 +2397,7 @@ void tx_ps_onoff(TRANSMITTER *tx, int state) {
       RECEIVER *rx_feedback = receiver[PS_RX_FEEDBACK];
 
       if (rx_feedback) {
-        memset(rx_feedback->iq_input_buffer, 0, rx_feedback->buffer_size * sizeof(double));
+        memset(rx_feedback->iq_input_buffer, 0, 2 * rx_feedback->buffer_size * sizeof(double));
 
         //
         // In principle we could call pscc and GetPSINfo and repeat this until
@@ -2463,7 +2445,7 @@ void tx_ps_onoff(TRANSMITTER *tx, int state) {
 void tx_ps_reset(const TRANSMITTER *tx) {
   if (tx->puresignal) {
     if (radio_is_remote) {
-      send_psreset(client_socket);
+      send_psreset(cl_sock_tcp);
       return;
     }
 
@@ -2474,7 +2456,7 @@ void tx_ps_reset(const TRANSMITTER *tx) {
 void tx_ps_resume(const TRANSMITTER *tx) {
   if (tx->puresignal) {
     if (radio_is_remote) {
-      send_psresume(client_socket);
+      send_psresume(cl_sock_tcp);
       return;
     }
 
@@ -2493,7 +2475,7 @@ void tx_ps_set_sample_rate(const TRANSMITTER *tx, int rate) {
 
 void tx_ps_setparams(const TRANSMITTER *tx) {
   if (radio_is_remote) {
-    send_psparams(client_socket, tx);
+    send_psparams(cl_sock_tcp, tx);
     return;
   }
 
@@ -2562,8 +2544,10 @@ void tx_set_bandpass(const TRANSMITTER *tx) {
 }
 
 void tx_set_compressor(TRANSMITTER *tx) {
+  g_idle_add(sliders_cmpr, GINT_TO_POINTER(100 * suppress_popup_sliders));
+
   if (radio_is_remote) {
-    send_tx_compressor(client_socket);
+    send_tx_compressor(cl_sock_tcp);
     return;
   }
 
@@ -2651,7 +2635,7 @@ void tx_set_deviation(const TRANSMITTER *tx) {
 
 void tx_set_dexp(const TRANSMITTER *tx) {
   if (radio_is_remote) {
-    send_dexp(client_socket);
+    send_dexp(cl_sock_tcp);
     return;
   }
 
@@ -2687,7 +2671,7 @@ void tx_set_dexp(const TRANSMITTER *tx) {
   SetDEXPRun(0, tx->dexp);
 }
 
-void tx_playback_start(const TRANSMITTER *tx) {
+void tx_xmit_captured_data_start(const TRANSMITTER *tx) {
   ASSERT_SERVER();
   //
   // Turn OFF compression etc. without affecting the mode_settings
@@ -2703,7 +2687,7 @@ void tx_playback_start(const TRANSMITTER *tx) {
   SetDEXPRun(0, 0);
 }
 
-void tx_playback_end(const TRANSMITTER *tx) {
+void tx_xmit_captured_data_end(const TRANSMITTER *tx) {
   ASSERT_SERVER();
   //
   // Restore compression, mic gain etc. (without affecting the mode_settings)
@@ -2720,7 +2704,7 @@ void tx_playback_end(const TRANSMITTER *tx) {
 
 void tx_set_equalizer(TRANSMITTER *tx) {
   if (radio_is_remote) {
-    send_eq(client_socket, tx->id);
+    send_eq(cl_sock_tcp, tx->id);
     return;
   }
 
@@ -2740,7 +2724,7 @@ void tx_set_equalizer(TRANSMITTER *tx) {
 
 void tx_set_fft_size(const TRANSMITTER *tx) {
   if (radio_is_remote) {
-    send_tx_fft(client_socket, tx);
+    send_tx_fft(cl_sock_tcp, tx);
     return;
   }
 
@@ -2749,7 +2733,7 @@ void tx_set_fft_size(const TRANSMITTER *tx) {
 
 void tx_set_mic_gain(const TRANSMITTER *tx) {
   if (radio_is_remote) {
-    send_micgain(client_socket, tx->mic_gain);
+    send_micgain(cl_sock_tcp, tx->mic_gain);
     return;
   }
 
@@ -2862,6 +2846,6 @@ void tx_set_twotone(TRANSMITTER *tx, int state) {
     }
   }
 
-  g_idle_add(ext_set_mox, GINT_TO_POINTER(state));
+  g_idle_add(ext_radio_set_mox, GINT_TO_POINTER(state));
 }
 

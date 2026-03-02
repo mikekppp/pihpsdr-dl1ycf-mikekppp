@@ -31,12 +31,12 @@
 
 #include "actions.h"
 #include "client_server.h"
-#ifdef GPIO
-  #include "configure.h"
-#endif
 #include "discovered.h"
 #include "ext.h"
 #include "gpio.h"
+#ifdef GPIO
+  #include "i2c.h"
+#endif
 #include "main.h"
 #include "message.h"
 #include "new_discovery.h"
@@ -65,6 +65,7 @@ static GtkWidget *apps_combobox[MAX_DEVICES];
 static GtkWidget *host_combo = NULL;
 static GtkWidget *host_entry = NULL;
 static GtkWidget *host_pwd = NULL;
+static int        pwd_from_props = 0;
 static int        host_entry_changed = 0;
 static int        host_pos = 0;
 static int        host_empty = 0;
@@ -76,7 +77,6 @@ static gulong     host_combo_signal_id = 0;
 #define           DISCOVERY_STARTING 3
 
 static int        discovery_state = 0;
-
 
 GtkWidget *tcpaddr;
 char ipaddr_radio[128] = { 0 };
@@ -91,14 +91,14 @@ static char host_addr[128] = "127.0.0.1:50000";
 static void host_entry_cb(GtkWidget *widget, gpointer data);
 
 static void print_devices(void) {
-  t_print("%s: discovery found %d devices\n", __FUNCTION__, devices);
+  t_print("%s: discovery found %d devices\n", __func__, devices);
 
   for (int i = 0; i < devices; i++) {
     switch (discovered[i].protocol) {
     case ORIGINAL_PROTOCOL:
     case NEW_PROTOCOL:
-      t_print("%s: found protocol=%d device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) on %s\n",
-              __FUNCTION__,
+      t_print("%s: found protocol=%d device=%d software_version=%d status=%d address=%s (%02X:%02X:%02X:%02X:%02X:%02X) via %s\n",
+              __func__,
               discovered[i].protocol,
               discovered[i].device,
               discovered[i].software_version,
@@ -114,7 +114,7 @@ static void print_devices(void) {
       break;
 
     case SOAPYSDR_PROTOCOL:
-      t_print("%s: found protocol=%d driver=%s software_version=%d driver_key=%s hardware_key=%s on %s\n", __FUNCTION__,
+      t_print("%s: found protocol=%d driver=%s software_version=%d driver_key=%s hardware_key=%s via %s\n", __func__,
               discovered[i].protocol,
               discovered[i].name,
               discovered[i].software_version,
@@ -126,7 +126,7 @@ static void print_devices(void) {
   }
 }
 
-static gboolean close_cb() {
+static gboolean close_cb(void) {
   host_entry_cb(host_entry, NULL);
   return TRUE;
 }
@@ -179,28 +179,18 @@ static gboolean protocols_cb (GtkWidget *widget, GdkEventButton *event, gpointer
 }
 
 #ifdef GPIO
-#ifdef GPIO_CONFIGURE_LINES
-static gboolean gpio_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  configure_gpio(discovery_dialog);
-  return TRUE;
-}
-
-#endif
-#endif
-
 static void gpio_changed_cb(GtkWidget *widget, gpointer data) {
   controller = gtk_combo_box_get_active(GTK_COMBO_BOX(widget));
-#ifndef GPIO
-
-  if (controller != G2_V2) {
-    controller = NO_CONTROLLER;
-    gtk_combo_box_set_active(GTK_COMBO_BOX(widget), controller);
-  }
-
-#endif
+  //
+  // This will generate a new gpio.props from scratch,
+  // all existing entries there are lost when changing the
+  // controller. Note: this will never be called on SATURNs, here
+  // piHPSDR makes the controller choice.
+  //
   gpio_set_defaults(controller);
-  gpioSaveState();
+  gpio_save_state();
 }
+#endif
 
 static gboolean discover_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
   gtk_widget_destroy(discovery_dialog);
@@ -214,7 +204,7 @@ static gboolean exit_cb (GtkWidget *widget, GdkEventButton *event, gpointer data
   return TRUE;
 }
 
-static void save_ipaddr() {
+static void save_ipaddr(void) {
   clearProperties();
 
   if (strlen(ipaddr_radio) > 0) {
@@ -248,7 +238,7 @@ static void tcp_en_cb(GtkWidget *widget, gpointer data) {
 // Supporting functions for the server selection screen |
 //------------------------------------------------------+
 
-static void save_hostlist() {
+static void save_hostlist(void) {
   g_signal_handler_block(G_OBJECT(host_combo), host_combo_signal_id);
   clearProperties();
   int count = 0;
@@ -269,6 +259,15 @@ static void save_hostlist() {
 
   SetPropI0("num_hosts", count);
   SetPropS0("current_host", host_addr);
+
+  if (pwd_from_props) {
+    const char *mypwd = gtk_entry_get_text(GTK_ENTRY(host_pwd));
+
+    if (strlen(mypwd) > 4) {
+      SetPropS0("host_pwd", mypwd);
+    }
+  }
+
   SetPropS0("property_version", "3.00");
   saveProperties("remote.props");
   gtk_combo_box_set_active(GTK_COMBO_BOX(host_combo), host_pos);
@@ -316,7 +315,7 @@ static void host_entry_cb(GtkWidget *widget, gpointer data) {
   save_hostlist();
 }
 
-static gboolean connect_cb(GtkWidget *widget, GdkEventButton *event, gpointer user_data) {
+static void connect_cb(GtkWidget *widget, gpointer data) {
   char myhost[256];
   int  myport;
   const char *mypwd;
@@ -333,11 +332,11 @@ static gboolean connect_cb(GtkWidget *widget, GdkEventButton *event, gpointer us
 
   g_strfreev(splitstr);
   mypwd = gtk_entry_get_text(GTK_ENTRY(host_pwd));
-  t_print("%s: host=%s port=%d\n", __FUNCTION__, myhost, myport);
+  t_print("%s: host=%s port=%d\n", __func__, myhost, myport);
 
   if (*myhost == 0 || myport == 0) {
     g_idle_add(fatal_error, "NOTICE: invalid host:port string.");
-    return TRUE;
+    return;
   }
 
   switch (radio_connect_remote(myhost, myport, mypwd)) {
@@ -370,8 +369,6 @@ static gboolean connect_cb(GtkWidget *widget, GdkEventButton *event, gpointer us
     g_idle_add(fatal_error, "NOTICE: unknown error in connect.");
     break;
   }
-
-  return TRUE;
 }
 
 static void host_combo_cb(GtkWidget *widget, gpointer data) {
@@ -482,11 +479,11 @@ gboolean discovery_keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer d
 
       case DEVICE_METIS:
       case NEW_DEVICE_ATLAS:
-      case DEVICE_GRIFFIN:
         r = "Old Metis";
         break;
 
       case DEVICE_HERMES:
+      case DEVICE_HERMES2:
       case NEW_DEVICE_HERMES:
       case NEW_DEVICE_HERMES2:
         r = "Hermes";
@@ -581,13 +578,13 @@ gboolean discovery_keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer d
 // Build the discovery window                         |
 //----------------------------------------------------+
 
-static void discovery() {
+static void discovery(void) {
   //
   // On the discovery screen, make the combo-boxes "touchscreen-friendly"
   //
   discovery_state = DISCOVERY_RUNNING;
   optimize_for_touchscreen = 1;
-  protocolsRestoreState();
+  protocols_restore_state();
   selected_device = 0;
   devices = 0;
   loadProperties("ipaddr.props");
@@ -605,7 +602,7 @@ static void discovery() {
       discovered[devices].protocol = ORIGINAL_PROTOCOL;
       discovered[devices].device = DEVICE_OZY;
       discovered[devices].software_version = 10;              // we can't know yet so this isn't a real response
-      snprintf(discovered[devices].name, sizeof(discovered[devices].name), "Ozy on USB");
+      snprintf(discovered[devices].name, sizeof(discovered[devices].name), "Ozy via USB");
       discovered[devices].frequency_min = 0.0;
       discovered[devices].frequency_max = 61440000.0;
 
@@ -621,7 +618,7 @@ static void discovery() {
       discovered[devices].use_tcp = 0;
       discovered[devices].use_routing = 0;
       discovered[devices].supported_receivers = 2;
-      t_print("%s: found USB OZY device min=%0.3f MHz max=%0.3f MHz\n", __FUNCTION__,
+      t_print("%s: found USB OZY device min=%0.3f MHz max=%0.3f MHz\n", __func__,
               discovered[devices].frequency_min * 1E-6,
               discovered[devices].frequency_max * 1E-6);
       devices++;
@@ -654,12 +651,12 @@ static void discovery() {
       status_text("Protocol 1 ... Discovering Devices");
     }
 
-    old_discovery();
+    p1_discovery();
   }
 
   if (enable_protocol_2 && !discover_only_stemlab) {
     status_text("Protocol 2 ... Discovering Devices");
-    new_discovery();
+    p2_discovery();
   }
 
 #ifdef SOAPYSDR
@@ -722,11 +719,11 @@ static void discovery() {
           snprintf(text, sizeof(text), "%s (%s via USB)", d->name,
                    d->protocol == ORIGINAL_PROTOCOL ? "Protocol 1" : "Protocol 2");
         } else if (d->device == NEW_DEVICE_SATURN && strcmp(d->network.interface_name, "XDMA") == 0) {
-          snprintf(text, sizeof(text), "%s (%s v%d) fpga:%x (%s) on /dev/xdma*", d->name,
+          snprintf(text, sizeof(text), "%s (%s v%d) fpga:%x (%s) via /dev/xdma*", d->name,
                    d->protocol == ORIGINAL_PROTOCOL ? "Protocol 1" : "Protocol 2", d->software_version,
                    d->fpga_version, macStr);
         } else {
-          snprintf(text, sizeof(text), "%s (%s %s) %s (%s) on %s: ",
+          snprintf(text, sizeof(text), "%s (%s %s) %s (%s) via %s ",
                    d->name,
                    d->protocol == ORIGINAL_PROTOCOL ? "Protocol 1" : "Protocol 2",
                    version,
@@ -739,7 +736,7 @@ static void discovery() {
 
       case SOAPYSDR_PROTOCOL:
 #ifdef SOAPYSDR
-        snprintf(text, sizeof(text), "%s (Protocol SOAPY_SDR %s) on %s", d->name, d->soapy.version, d->soapy.address);
+        snprintf(text, sizeof(text), "%s (Protocol SOAPY_SDR %s) via %s", d->name, d->soapy.version, d->soapy.address);
 #endif
         break;
 
@@ -850,7 +847,7 @@ static void discovery() {
   //----------------------------------------------------+
   loadProperties("remote.props");
   GetPropS0("current_host", host_addr);
-  t_print("%s: current host %s\n", __FUNCTION__, host_addr);
+  t_print("%s: current server host %s\n", __func__, host_addr);
   // Create a "Server" button
   GtkWidget *start_server_button = gtk_button_new_with_label("Use Server");
   g_signal_connect(start_server_button, "clicked", G_CALLBACK(connect_cb), grid);
@@ -868,7 +865,7 @@ static void discovery() {
   for (int i = 0; i < num_hosts; i++) {
     *str = 0;
     GetPropS1("host[%d]", i, str);
-    t_print("%s: HOST ENTRY #%d = %s\n", __FUNCTION__, i, str);
+    t_print("%s: server host entry #%d = %s\n", __func__, i, str);
 
     if (strcmp(str, host_addr) && *str && strlen(str) > 0) {  // Avoid duplicate
       gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(host_combo), NULL, str);
@@ -886,26 +883,107 @@ static void discovery() {
   // Create the password entry box
   host_pwd = gtk_entry_new();
   gtk_entry_set_visibility(GTK_ENTRY(host_pwd), FALSE);
-  gtk_entry_set_placeholder_text(GTK_ENTRY(host_pwd), "Server Password");
+  //
+  // If there *is* a host pwd in the props file, it will be used
+  // and also written back to the props file. But a password
+  // will only occur in remote.props if it has been put there
+  // by manual editing.
+  //
+  *str = 0;
+  GetPropS0("host_pwd", str);
+
+  if (strlen(str) > 4) {
+    gtk_entry_set_text(GTK_ENTRY(host_pwd), str);
+    pwd_from_props = 1;
+  } else {
+    gtk_entry_set_placeholder_text(GTK_ENTRY(host_pwd), "Server Password");
+  }
+
   gtk_grid_attach(GTK_GRID(grid), host_pwd, 2, row, 1, 1);
+  //
+  // "Enter" in the pwd file induces connection
+  //
+  g_signal_connect(host_pwd, "activate", G_CALLBACK(connect_cb), NULL);
   // Create the password visibility toggle button
   GtkWidget *toggle_button = gtk_toggle_button_new_with_label("Show");
   g_signal_connect(toggle_button, "toggled", G_CALLBACK(password_visibility_cb), host_pwd);
   gtk_grid_attach(GTK_GRID(grid), toggle_button, 3, row, 1, 1);
   row++;
-  controller = NO_CONTROLLER;
-  gpioRestoreState();
-  gpio_set_defaults(controller);
-  GtkWidget *gpio = gtk_combo_box_text_new();
-  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "No Controller");
-  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "Controller1");
-  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "Controller2 V1");
-  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "Controller2 V2");
-  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "G2 Front Panel");
-  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "G2 Mk2 Panel");
-  my_combo_attach(GTK_GRID(grid), gpio, 0, row, 1, 1);
-  gtk_combo_box_set_active(GTK_COMBO_BOX(gpio), controller);
-  g_signal_connect(gpio, "changed", G_CALLBACK(gpio_changed_cb), NULL);
+
+  //
+  // Check if we have "discovered" SATURN device via XDMA. Note if compiled *without* GPIO.
+  // a G2V2 is assumed. If compiled *with* GPIO support, a G2V1 is assumed if the
+  // MCP23017 expander on the front panel is detected via i2c_check_presence().
+  //
+
+#ifdef SATURN
+  for (int i = 0; i < devices; i++) {
+    if (discovered[i].device == NEW_DEVICE_SATURN &&
+        !strcmp(discovered[i].network.interface_name, "XDMA")) {
+
+#ifdef GPIO
+      if (i2c_check_presence()) {
+        have_g2v1 = 1;
+      }
+#endif
+
+      if (!have_g2v1) { have_g2v2 = 1; }
+    }
+  }
+#endif
+
+#ifdef GPIO
+  //
+  // Even if compiled with GPIO support, do *not* show the "controller"
+  // menu on a G2. Instead, default to NO_CONTROLLER for G2-ultra and to
+  // G2V1_PANEL for first-generation G2s with the CONTROLLER2_V2 clone.
+  //
+  // Likewise, when /dev/serial/by-id/Remotehead-9600 exists, also
+  // do not show the "controller" menu but auto-choose CONTROLLER3.
+  // Even if the controller is not shown, use a "gpio.props" file
+  // such that in special cases, something can be changed manually.
+  //
+  gpio_restore_state();
+  if (have_g2v2) {
+    if (controller != NO_CONTROLLER) {
+      controller = NO_CONTROLLER;
+      gpio_set_defaults(controller);
+      gpio_save_state();
+    }
+  } else if (have_g2v1) {
+    if (controller != G2V1_PANEL) {
+      controller = G2V1_PANEL;
+      gpio_set_defaults(controller);
+      gpio_save_state();
+    }
+  } else if (realpath("/dev/serial/by-id/Remotehead-9600", NULL) != NULL) {
+    if (controller != CONTROLLER3) {
+      controller = CONTROLLER3;
+      gpio_set_defaults(controller);
+      gpio_save_state();
+    }
+  } else {
+    if (controller > CONTROLLER2_V2) {
+      //
+      // This should not happen: auto-detected controller in the props file
+      // has not been auto-detected.
+      //
+      controller = NO_CONTROLLER;
+      gpio_set_defaults(controller);
+      gpio_save_state();
+    }
+
+    GtkWidget *gpio = gtk_combo_box_text_new();
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "No Controller");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "Controller1");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "Controller2 V1");
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(gpio), NULL, "Controller2 V2");
+    my_combo_attach(GTK_GRID(grid), gpio, 0, row, 1, 1);
+    gtk_combo_box_set_active(GTK_COMBO_BOX(gpio), controller);
+    g_signal_connect(gpio, "changed", G_CALLBACK(gpio_changed_cb), NULL);
+  }
+#endif
+
   GtkWidget *discover_b = gtk_button_new_with_label("Discover");
   g_signal_connect (discover_b, "button-press-event", G_CALLBACK(discover_cb), NULL);
   gtk_grid_attach(GTK_GRID(grid), discover_b, 1, row, 1, 1);
@@ -935,7 +1013,7 @@ static void discovery() {
   gtk_grid_attach(GTK_GRID(grid), exit_b, 3, row, 1, 1);
   gtk_container_add (GTK_CONTAINER (content), grid);
   gtk_widget_show_all(discovery_dialog);
-  t_print("%s: showing device dialog\n", __FUNCTION__);
+  t_print("%s: showing device dialog\n", __func__);
   //
   // Autostart and RedPitaya radios:
   //
@@ -950,7 +1028,7 @@ static void discovery() {
   // and then the discovery process is re-initiated for RedPitya
   // devices only.
   //
-  t_print("%s: devices=%d autostart=%d\n", __FUNCTION__, devices, autostart);
+  t_print("%s: devices=%d autostart=%d\n", __func__, devices, autostart);
 
   if (devices == 1 && autostart) {
     d = &discovered[0];

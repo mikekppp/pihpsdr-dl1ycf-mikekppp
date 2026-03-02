@@ -24,6 +24,7 @@
 #include "audio.h"
 #include "ext.h"
 #include "filter.h"
+#include "gpio.h"
 #include "message.h"
 #include "mode.h"
 #include "new_menu.h"
@@ -85,10 +86,11 @@ enum _tx_choices {
   TX_TUNE_USE_DRIVE,
   TX_SWR_PROTECTION,
   TX_USE_RX_FILTER,
-  TX_LOCAL_MIC,
   TX_FM_EMP,
+  TX_AUDIO_MON,
   TX_SWRTUNE,
-  TX_SWRTUNE_VOLUME
+  TX_SWRTUNE_VOLUME,
+  TX_ADD_HPSDR_MIC_SAMPLES
 };
 
 enum _dexp_choices {
@@ -110,7 +112,7 @@ enum _cfc_choices {
   CFC_EQ
 };
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -121,7 +123,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -187,6 +189,7 @@ static void sel_cb(GtkWidget *widget, gpointer data) {
 
   if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) {
     gtk_widget_show(my_container);
+    gtk_window_resize(GTK_WINDOW(dialog), 1, 1);
     which_container = c;
   } else {
     gtk_widget_hide(my_container);
@@ -209,9 +212,7 @@ static void spinbtn_cb(GtkWidget *widget, gpointer data) {
     case TX_LINEIN:
       linein_gain = v;
 
-      if (radio_is_remote) {
-        send_txmenu(client_socket);
-      } else {
+      if (!radio_is_remote) {
         schedule_transmit_specific();
       }
 
@@ -221,7 +222,7 @@ static void spinbtn_cb(GtkWidget *widget, gpointer data) {
       transmitter->fps = vi;
 
       if (radio_is_remote) {
-        send_txfps(client_socket, transmitter->fps);
+        send_txfps(cl_sock_tcp, transmitter->fps);
       } else {
         tx_set_framerate(transmitter);
       }
@@ -264,7 +265,7 @@ static void spinbtn_cb(GtkWidget *widget, gpointer data) {
       transmitter->am_carrier_level = v;
 
       if (radio_is_remote) {
-        send_am_carrier(client_socket);
+        send_am_carrier(cl_sock_tcp);
       } else {
         tx_set_am_carrier_level(transmitter);
       }
@@ -275,7 +276,7 @@ static void spinbtn_cb(GtkWidget *widget, gpointer data) {
       transmitter->tune_drive = vi;
 
       if (radio_is_remote) {
-        send_txmenu(client_socket);
+        send_txmenu(cl_sock_tcp);
       }
 
       break;
@@ -284,7 +285,7 @@ static void spinbtn_cb(GtkWidget *widget, gpointer data) {
       drive_digi_max = v;
 
       if (radio_is_remote) {
-        send_digidrivemax(client_socket);
+        send_digidrivemax(cl_sock_tcp);
       } else if ((mode == modeDIGL || mode == modeDIGU) && transmitter->drive > v + 0.5) {
         radio_set_drive(v);
       }
@@ -295,7 +296,7 @@ static void spinbtn_cb(GtkWidget *widget, gpointer data) {
       transmitter->swr_alarm = v;
 
       if (radio_is_remote) {
-        send_txmenu(client_socket);
+        send_txmenu(cl_sock_tcp);
       }
 
       break;
@@ -383,7 +384,7 @@ static void chkbtn_cb(GtkWidget *widget, gpointer data) {
       transmitter->ctcss_enabled = v;
 
       if (radio_is_remote) {
-        send_ctcss(client_socket);
+        send_ctcss(cl_sock_tcp);
       } else {
         tx_set_ctcss(transmitter);
       }
@@ -396,7 +397,7 @@ static void chkbtn_cb(GtkWidget *widget, gpointer data) {
       gtk_widget_set_sensitive (tunedrive_spin, NOT(v));
 
       if (radio_is_remote) {
-        send_txmenu(client_socket);
+        send_txmenu(cl_sock_tcp);
       }
 
       break;
@@ -410,7 +411,7 @@ static void chkbtn_cb(GtkWidget *widget, gpointer data) {
       transmitter->swr_protection = v;
 
       if (radio_is_remote) {
-        send_txmenu(client_socket);
+        send_txmenu(cl_sock_tcp);
       }
 
       break;
@@ -422,28 +423,19 @@ static void chkbtn_cb(GtkWidget *widget, gpointer data) {
       gtk_widget_set_sensitive (tx_spin_high, NOT(v));
       break;
 
-    case TX_LOCAL_MIC:
-      if (v) {
-        if (audio_open_input() == 0) {
-          transmitter->local_microphone = 1;
-        } else {
-          transmitter->local_microphone = 0;
-          gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (widget), FALSE);
-        }
-      } else {
-        if (transmitter->local_microphone) {
-          transmitter->local_microphone = 0;
-          audio_close_input();
-        }
-      }
+    case TX_ADD_HPSDR_MIC_SAMPLES:
+      transmitter->add_hpsdr_mic_samples = v;
+      break;
 
+    case TX_AUDIO_MON:
+      transmitter->audiomonitor = v;
       break;
 
     case TX_FM_EMP:
       transmitter->pre_emphasize = !v;
 
       if (radio_is_remote) {
-        send_preemp(client_socket);
+        send_preemp(cl_sock_tcp);
       } else {
         tx_set_pre_emphasize(transmitter);
       }
@@ -504,18 +496,19 @@ static void mic_in_cb(GtkWidget *widget, gpointer data) {
     break;
   }
 
-  if (radio_is_remote) {
-    send_txmenu(client_socket);
-  } else {
+  if (!radio_is_remote) {
     schedule_transmit_specific();
   }
+#ifdef GPIO
+  gpio_set_orion_options();
+#endif
 }
 
 static void ctcss_frequency_cb(GtkWidget *widget, gpointer data) {
   transmitter->ctcss = gtk_combo_box_get_active(GTK_COMBO_BOX(widget));
 
   if (radio_is_remote) {
-    send_ctcss(client_socket);
+    send_ctcss(cl_sock_tcp);
   } else {
     tx_set_ctcss(transmitter);
   }
@@ -527,17 +520,35 @@ static void ctcss_frequency_cb(GtkWidget *widget, gpointer data) {
 static void local_input_changed_cb(GtkWidget *widget, gpointer data) {
   int i = gtk_combo_box_get_active(GTK_COMBO_BOX(widget));
 
-  if (transmitter->local_microphone) {
-    audio_close_input();
+  if (i < 0) {
+    gtk_combo_box_set_active(GTK_COMBO_BOX(widget), 0);
+    i = 0;
   }
 
-  snprintf(transmitter->microphone_name, sizeof(transmitter->microphone_name), "%s", input_devices[i].name);
+  if (transmitter->local_audio) {
+    transmitter->local_audio = 0;
+    audio_close_input(transmitter);
+  }
 
-  if (transmitter->local_microphone) {
-    if (audio_open_input() < 0) {
-      transmitter->local_microphone = 0;
+  if (i > 0) {
+    transmitter->local_audio = 1;
+    snprintf(transmitter->audio_name, sizeof(transmitter->audio_name), "%s", input_devices[i - 1].name);
+
+    if (audio_open_input(transmitter) < 0) {
+      gtk_combo_box_set_active(GTK_COMBO_BOX(widget), 0);
+      transmitter->local_audio = 0;
     }
   }
+
+  int txmode = vfo_get_tx_mode();
+  mode_settings[txmode].tx_local_audio = transmitter->local_audio;
+
+  if (transmitter->local_audio) {
+    snprintf(mode_settings[txmode].tx_audio_name, sizeof(mode_settings[txmode].tx_audio_name), "%s",
+             transmitter->audio_name);
+  }
+
+  copy_mode_settings(txmode);
 }
 
 void tx_menu(GtkWidget *parent) {
@@ -621,41 +632,32 @@ void tx_menu(GtkWidget *parent) {
   gtk_grid_set_row_spacing (GTK_GRID(tx_grid), 5);
   gtk_container_add(GTK_CONTAINER(tx_container), tx_grid);
   row = 0;
+  row++;
+  col = 0;
+  label = gtk_label_new("TX Audio In");
+  gtk_widget_set_halign(label, GTK_ALIGN_END);
+  gtk_widget_set_name(label, "boldlabel");
+  gtk_grid_attach(GTK_GRID(tx_grid), label, col++, row, 1, 1);
+  input = gtk_combo_box_text_new();
+  gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(input), NULL, "From Radio");
+  gtk_combo_box_set_active(GTK_COMBO_BOX(input), 0);
 
-  if (n_input_devices > 0) {
-    row++;
-    col = 0;
-    btn = gtk_check_button_new_with_label("Local Microphone");
-    gtk_widget_set_halign(btn, GTK_ALIGN_END);
-    gtk_widget_set_name(btn, "boldlabel");
-    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (btn), transmitter->local_microphone);
-    gtk_grid_attach(GTK_GRID(tx_grid), btn, col++, row, 1, 1);
-    g_signal_connect(btn, "toggled", G_CALLBACK(chkbtn_cb), GINT_TO_POINTER(TX_LOCAL_MIC));
-    input = gtk_combo_box_text_new();
+  for (int i = 0; i < n_input_devices; i++) {
+    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(input), NULL, input_devices[i].description);
 
-    for (int i = 0; i < n_input_devices; i++) {
-      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(input), NULL, input_devices[i].description);
-
-      if (strcmp(transmitter->microphone_name, input_devices[i].name) == 0) {
-        gtk_combo_box_set_active(GTK_COMBO_BOX(input), i);
-      }
+    if (transmitter->local_audio && strcmp(transmitter->audio_name, input_devices[i].name) == 0) {
+      gtk_combo_box_set_active(GTK_COMBO_BOX(input), i + 1);
     }
-
-    // If the combo box shows no device, take the first one
-    // AND set the mic.name to that device name.
-    // This situation occurs if the local microphone device in the props
-    // file is no longer present
-
-    if (gtk_combo_box_get_active(GTK_COMBO_BOX(input))  < 0) {
-      gtk_combo_box_set_active(GTK_COMBO_BOX(input), 0);
-      snprintf(transmitter->microphone_name, sizeof(transmitter->microphone_name), "%s", input_devices[0].name);
-    }
-
-    my_combo_attach(GTK_GRID(tx_grid), input, col, row, 4, 1);
-    g_signal_connect(input, "changed", G_CALLBACK(local_input_changed_cb), NULL);
   }
 
-  if (have_mic) {
+  if (!transmitter->local_audio) {
+    gtk_combo_box_set_active(GTK_COMBO_BOX(input), 0);
+  }
+
+  my_combo_attach(GTK_GRID(tx_grid), input, col, row, 4, 1);
+  g_signal_connect(input, "changed", G_CALLBACK(local_input_changed_cb), NULL);
+
+  if (have_mic || controller == CONTROLLER3) {
     row++;
     col = 0;
     label = gtk_label_new("Radio Mic");
@@ -668,10 +670,12 @@ void tx_menu(GtkWidget *parent) {
     btn = gtk_combo_box_text_new();
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(btn), NULL, "Mic In");
     gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(btn), NULL, "Mic Boost");
-    gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(btn), NULL, "Line In");
+    if (have_mic) {
+      gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(btn), NULL, "Line In");
+    }
     int pos = 0;
 
-    if (mic_linein) {
+    if (mic_linein && have_mic) {
       pos = 2;
     } else if (mic_boost) {
       pos = 1;
@@ -680,6 +684,14 @@ void tx_menu(GtkWidget *parent) {
     gtk_combo_box_set_active(GTK_COMBO_BOX(btn), pos);
     my_combo_attach(GTK_GRID(tx_grid), btn, col++, row, 1, 1);
     g_signal_connect(btn, "changed", G_CALLBACK(mic_in_cb), NULL);
+  }
+
+  if (have_mic && !radio_is_remote) {
+    btn = gtk_check_button_new_with_label("Add Mic Samples");
+    gtk_widget_set_name(btn, "boldlabel");
+    gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (btn), transmitter->add_hpsdr_mic_samples);
+    gtk_grid_attach(GTK_GRID(tx_grid), btn, col, row, 1, 1);
+    g_signal_connect(btn, "toggled", G_CALLBACK(chkbtn_cb), GINT_TO_POINTER(TX_ADD_HPSDR_MIC_SAMPLES));
     col++;
     label = gtk_label_new("LineIn Lvl (dB)");
     gtk_widget_set_name(label, "boldlabel");
@@ -797,6 +809,11 @@ void tx_menu(GtkWidget *parent) {
   gtk_grid_attach(GTK_GRID(tx_grid), btn, col, row, 1, 1);
   g_signal_connect(btn, "value_changed", G_CALLBACK(spinbtn_cb), GINT_TO_POINTER(TX_PAN_LOW));
   col++;
+  btn = gtk_check_button_new_with_label("TX Audio Monitor");
+  gtk_widget_set_name(btn, "boldlabel");
+  gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (btn), transmitter->audiomonitor);
+  gtk_grid_attach(GTK_GRID(tx_grid), btn, col, row, 1, 1);
+  g_signal_connect(btn, "toggled", G_CALLBACK(chkbtn_cb), GINT_TO_POINTER(TX_AUDIO_MON));
   col++;
   label = gtk_label_new("Max Digi Drv");
   gtk_widget_set_name(label, "boldlabel");
@@ -854,7 +871,7 @@ void tx_menu(GtkWidget *parent) {
   gtk_grid_attach(GTK_GRID(cfc_grid), btn, 3, row, 3, 1);
   g_signal_connect(btn, "toggled", G_CALLBACK(chkbtn_cb), GINT_TO_POINTER(CFC_EQ));
   row++;
-  label = gtk_label_new("Add Freq-Indep. Compression:");
+  label = gtk_label_new("Add Freq-Indep. Compression");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(cfc_grid), label, 0, row, 2, 1);
@@ -862,7 +879,7 @@ void tx_menu(GtkWidget *parent) {
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(btn), transmitter->cfc_lvl[0]);
   gtk_grid_attach(GTK_GRID(cfc_grid), btn, 2, row, 1, 1);
   g_signal_connect(btn, "value-changed", G_CALLBACK(spinbtn_cb), GINT_TO_POINTER(CFCLVL));
-  label = gtk_label_new("Add Freq-Indep. Gain:");
+  label = gtk_label_new("Add Freq-Indep. Gain");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(cfc_grid), label, 3, row, 2, 1);
@@ -1034,7 +1051,6 @@ void tx_menu(GtkWidget *parent) {
   GtkWidget *b_panadapter_peaks_on = gtk_check_button_new_with_label("Label Strongest Peaks");
   gtk_widget_set_name(b_panadapter_peaks_on, "boldlabel");
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(b_panadapter_peaks_on), transmitter->panadapter_peaks_on);
-  gtk_widget_show(b_panadapter_peaks_on);
   gtk_grid_attach(GTK_GRID(peaks_grid), b_panadapter_peaks_on, col, row, 1, 1);
   g_signal_connect(b_panadapter_peaks_on, "toggled", G_CALLBACK(tx_panadapter_peaks_on_cb), NULL);
   row++;
@@ -1042,28 +1058,25 @@ void tx_menu(GtkWidget *parent) {
   gtk_widget_set_name(b_pan_peaks_in_passband, "boldlabel");
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(b_pan_peaks_in_passband),
                                transmitter->panadapter_peaks_in_passband_filled);
-  gtk_widget_show(b_pan_peaks_in_passband);
   gtk_grid_attach(GTK_GRID(peaks_grid), b_pan_peaks_in_passband, col, row, 1, 1);
   g_signal_connect(b_pan_peaks_in_passband, "toggled", G_CALLBACK(tx_panadapter_peaks_in_passband_filled_cb), NULL);
   GtkWidget *b_pan_hide_noise = gtk_check_button_new_with_label("No Labels Below Noise Floor");
   gtk_widget_set_name(b_pan_hide_noise, "boldlabel");
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(b_pan_hide_noise), transmitter->panadapter_hide_noise_filled);
-  gtk_widget_show(b_pan_hide_noise);
   gtk_grid_attach(GTK_GRID(peaks_grid), b_pan_hide_noise, col, ++row, 1, 1);
   g_signal_connect(b_pan_hide_noise, "toggled", G_CALLBACK(tx_panadapter_hide_noise_filled_cb), NULL);
-  label = gtk_label_new("Number of Peaks to Label:");
+  label = gtk_label_new("Number of Peaks to Label");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(peaks_grid), label, col, ++row, 1, 1);
   col++;
   GtkWidget *panadapter_num_peaks_r = gtk_spin_button_new_with_range(1.0, 10.0, 1.0);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(panadapter_num_peaks_r), (double)transmitter->panadapter_num_peaks);
-  gtk_widget_show(panadapter_num_peaks_r);
   gtk_grid_attach(GTK_GRID(peaks_grid), panadapter_num_peaks_r, col, row, 1, 1);
   g_signal_connect(panadapter_num_peaks_r, "value_changed", G_CALLBACK(tx_panadapter_num_peaks_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Ignore Adjacent Peaks:");
+  label = gtk_label_new("Ignore Adjacent Peaks");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(peaks_grid), label, col, row, 1, 1);
@@ -1071,13 +1084,12 @@ void tx_menu(GtkWidget *parent) {
   GtkWidget *panadapter_ignore_range_divider_r = gtk_spin_button_new_with_range(1.0, 150.0, 1.0);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(panadapter_ignore_range_divider_r),
                             (double)transmitter->panadapter_ignore_range_divider);
-  gtk_widget_show(panadapter_ignore_range_divider_r);
   gtk_grid_attach(GTK_GRID(peaks_grid), panadapter_ignore_range_divider_r, col, row, 1, 1);
   g_signal_connect(panadapter_ignore_range_divider_r, "value_changed",
                    G_CALLBACK(tx_panadapter_ignore_range_divider_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Noise Floor Percentile:");
+  label = gtk_label_new("Noise Floor Percentile");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(peaks_grid), label, col, row, 1, 1);
@@ -1085,7 +1097,6 @@ void tx_menu(GtkWidget *parent) {
   GtkWidget *panadapter_ignore_noise_percentile_r = gtk_spin_button_new_with_range(1.0, 100.0, 1.0);
   gtk_spin_button_set_value(GTK_SPIN_BUTTON(panadapter_ignore_noise_percentile_r),
                             (double)transmitter->panadapter_ignore_noise_percentile);
-  gtk_widget_show(panadapter_ignore_noise_percentile_r);
   gtk_grid_attach(GTK_GRID(peaks_grid), panadapter_ignore_noise_percentile_r, col, row, 1, 1);
   g_signal_connect(panadapter_ignore_noise_percentile_r, "value_changed",
                    G_CALLBACK(tx_panadapter_ignore_noise_percentile_value_changed_cb), NULL);
@@ -1199,4 +1210,5 @@ void tx_menu(GtkWidget *parent) {
     gtk_widget_hide(peaks_container);
     break;
   }
+  gtk_window_resize(GTK_WINDOW(dialog), 1, 1);
 }

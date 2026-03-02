@@ -18,10 +18,6 @@
 */
 
 #include <gtk/gtk.h>
-#include <semaphore.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "band.h"
 #include "client_server.h"
@@ -31,7 +27,6 @@
 #include "new_menu.h"
 #include "radio.h"
 #include "vfo.h"
-#include "xvtr_menu.h"
 
 static GtkWidget *dialog = NULL;
 static GtkWidget *title[BANDS + XVTRS];
@@ -42,7 +37,7 @@ static GtkWidget *lo_error[BANDS + XVTRS];
 static GtkWidget *gain[BANDS + XVTRS];
 static GtkWidget *disable_pa[BANDS + XVTRS];
 
-static void save_xvtr () {
+static void save_xvtr (void) {
   for (int i = BANDS; i < BANDS + XVTRS; i++) {
     const char *txt;
     char f[16];
@@ -128,15 +123,15 @@ static void save_xvtr () {
 
   if (radio_is_remote) {
     for (int b = BANDS; b < BANDS + XVTRS; b++) {
-      send_band_data(client_socket, b);
+      send_band_data(cl_sock_tcp, b);
       const BAND *band = band_get_band(b);
 
       for (int s = 0; s < band->bandstack->entries; s++) {
-        send_bandstack_data(client_socket, b, s);
+        send_bandstack_data(cl_sock_tcp, b, s);
       }
     }
 
-    send_xvtr_changed(client_socket);
+    send_xvtr_changed(cl_sock_tcp);
   } else {
     vfo_xvtr_changed();
   }
@@ -148,7 +143,7 @@ static void pa_disable_cb(GtkWidget *widget, gpointer data) {
   xvtr->disablePA = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
 }
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -160,12 +155,12 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb() {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
 
-static gboolean update_cb() {
+static gboolean update_cb(void) {
   save_xvtr();
   return TRUE;
 }

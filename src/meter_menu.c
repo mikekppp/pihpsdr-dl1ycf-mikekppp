@@ -18,13 +18,8 @@
 */
 
 #include <gtk/gtk.h>
-#include <string.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <unistd.h>
 
 #include "client_server.h"
-#include "meter_menu.h"
 #include "meter.h"
 #include "new_menu.h"
 #include "radio.h"
@@ -32,7 +27,7 @@
 
 static GtkWidget *dialog = NULL;
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -43,7 +38,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -68,7 +63,7 @@ static void smeter_select_cb (GtkToggleButton *widget, gpointer        data) {
       alcmode = transmitter->alcmode;
     }
 
-    send_meter(client_socket, active_receiver->smetermode, alcmode);
+    send_meter(cl_sock_tcp, active_receiver->smetermode, alcmode);
   }
 }
 
@@ -90,7 +85,7 @@ static void alc_select_cb(GtkToggleButton *widget, gpointer data) {
   }
 
   if (radio_is_remote) {
-    send_meter(client_socket, active_receiver->smetermode, transmitter->alcmode);
+    send_meter(cl_sock_tcp, active_receiver->smetermode, transmitter->alcmode);
   }
 }
 
@@ -112,7 +107,7 @@ void meter_menu (GtkWidget *parent) {
   gtk_widget_set_name(close_b, "close_button");
   g_signal_connect (close_b, "button-press-event", G_CALLBACK(close_cb), NULL);
   gtk_grid_attach(GTK_GRID(grid), close_b, 0, 0, 1, 1);
-  w = gtk_label_new("Meter Type:");
+  w = gtk_label_new("Meter Type");
   gtk_widget_set_name(w, "boldlabel");
   gtk_widget_set_halign(w, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(grid), w, 0, 1, 1, 1);
@@ -122,7 +117,7 @@ void meter_menu (GtkWidget *parent) {
   gtk_combo_box_text_append(GTK_COMBO_BOX_TEXT(w), NULL, "Analog");
   gtk_combo_box_set_active(GTK_COMBO_BOX(w), analog_meter ? 1 : 0);
   g_signal_connect(w, "changed", G_CALLBACK(analog_cb), NULL);
-  w = gtk_label_new("S-Meter Reading:");
+  w = gtk_label_new("S-Meter Reading");
   gtk_widget_set_name(w, "boldlabel");
   gtk_widget_set_halign(w, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(grid), w, 0, 2, 1, 1);
@@ -144,7 +139,7 @@ void meter_menu (GtkWidget *parent) {
   g_signal_connect(w, "changed", G_CALLBACK(smeter_select_cb), NULL);
 
   if (can_transmit) {
-    w = gtk_label_new("TX ALC Reading:");
+    w = gtk_label_new("TX ALC Reading");
     gtk_widget_set_name(w, "boldlabel");
     gtk_widget_set_halign(w, GTK_ALIGN_END);
     gtk_grid_attach(GTK_GRID(grid), w, 0, 3, 1, 1);

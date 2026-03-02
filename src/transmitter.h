@@ -78,8 +78,42 @@ typedef struct _transmitter {
 
   cairo_surface_t *panadapter_surface;
 
-  int local_microphone;
-  gchar microphone_name[128];
+  int audiomonitor;  // put incoming mic samples to the "side tone" channel
+
+  //
+  // everything related to local (TX input) audio
+  //
+  int local_audio;
+  //
+  // if add_hpsdr_mic_samples && local_audio && hpsdr_ptt, add the
+  // mic samples from the HPSDR radio to the local audio TX input stream
+  //
+  int add_hpsdr_mic_samples;
+  char audio_name[128];
+  GMutex audio_mutex;
+  GThread * audio_thread_id;
+  int audio_flag;
+  volatile int audio_buffer_inpt;
+  volatile int audio_buffer_outpt;
+  volatile int audio_running;
+  double *audio_buffer;
+
+#if defined(PORTAUDIO) && defined(PULSEAUDIO) && defined(ALSA)
+  // this is only possible for "cppcheck" runs
+  // declare all data without conflicts
+  void *audio_handle;
+  snd_pcm_format_t audio_format;
+#endif
+#if defined(PORTAUDIO) && !defined(PULSEAUDIO) && !defined(ALSA)
+  PaStream *audio_handle;
+#endif
+#if !defined(PORTAUDIO) && !defined(PULSEAUDIO) && defined(ALSA)
+  snd_pcm_t *audio_handle;
+  snd_pcm_format_t audio_format;
+#endif
+#if !defined(PORTAUDIO) && defined(PULSEAUDIO) && !defined(ALSA)
+  pa_simple *audio_handle;
+#endif
 
   int out_of_band;
   guint out_of_band_timer_id;
@@ -96,7 +130,6 @@ typedef struct _transmitter {
 
   int psinfo[16];
   double ps_getmx;
-  double ps_getpk;
   double ps_setpk;
   // PS 2.0 parameters
   double ps_ampdelay;
@@ -173,7 +206,7 @@ typedef struct _transmitter {
   int display_filled;
 
   double *cw_sig_rf;      // contains the CW RF envelope
-  int    *p1stone;        // contains side tone (CW or TUNE), only used in P1
+  double *p1stone;        // contains side tone (CW or TUNE), only used in P1
 
   int cw_ramp_audio_len;  // ramp width in samples
   int cw_ramp_audio_ptr;
@@ -197,7 +230,7 @@ extern TRANSMITTER *tx_create_transmitter(int id, int pixels, int width, int hei
 void tx_create_dialog(TRANSMITTER *tx);
 void tx_reconfigure(TRANSMITTER *tx, int pixels, int width, int height);
 
-extern void   tx_add_mic_sample(TRANSMITTER *tx, short next_mic_sample);
+extern void   tx_add_mic_sample(TRANSMITTER *tx, double mic_sample);
 extern void   tx_add_ps_iq_samples(const TRANSMITTER *tx, double i_sample_0, double q_sample_0, double i_sample_1,
                                    double q_sample_1);
 
@@ -208,8 +241,8 @@ extern int    tx_get_pixels(TRANSMITTER *tx);
 extern void   tx_off(const TRANSMITTER *tx);
 extern void   tx_on(const TRANSMITTER *tx);
 
-extern void   tx_playback_start(const TRANSMITTER *tx);
-extern void   tx_playback_end(const TRANSMITTER *tx);
+extern void   tx_xmit_captured_data_start(const TRANSMITTER *tx);
+extern void   tx_xmit_captured_data_end(const TRANSMITTER *tx);
 
 extern void   tx_ps_getinfo(TRANSMITTER *tx);
 extern void   tx_ps_getmx(TRANSMITTER *tx);
@@ -247,9 +280,8 @@ extern void   tx_set_singletone(const TRANSMITTER *tx, int state, double freq);
 extern void   tx_set_twotone(TRANSMITTER *tx, int state);
 extern void   tx_queue_cw_event(int state, int wait);
 
-extern void tx_create_remote(TRANSMITTER *rx);
-extern int  tx_remote_update_display(gpointer data);
-
+extern void tx_create_remote(TRANSMITTER *tx);
+extern gpointer client_sidetone_thread(gpointer tx);
 #endif
 
 

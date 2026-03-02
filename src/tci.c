@@ -98,8 +98,8 @@ static gpointer tci_listener(gpointer data);
 // enabled in the props file, and from the CAT/TCI menu
 // if TCI is enabled there.
 //
-void launch_tci () {
-  t_print( "%s: LAUNCHING TCI SERVER \n", __FUNCTION__);
+void launch_tci (void) {
+  t_print( "%s: LAUNCHING TCI SERVER \n", __func__);
   tci_running = 1;
   //
   // Start TCI server
@@ -108,70 +108,51 @@ void launch_tci () {
 }
 
 //
-// This enforces closing a "listener" connection even if it "hangs"
-// and removes the autoreporting task. Do not  join with the listener
-// so this may be called from  within the listener.
-//
-static void force_close(CLIENT *client) {
-  struct linger linger = { 0 };
-  linger.l_onoff = 1;
-  linger.l_linger = 0;
-  client->running = 0;
-
-  if (client->fd  != -1) {
-    // No error checking since the socket may have been close in a race condition
-    // in the listener
-    setsockopt(client->fd, SOL_SOCKET, SO_LINGER, (const char *)&linger, sizeof(linger));
-    close(client->fd);
-    client->fd = -1;
-  }
-
-  if (client->tci_timer != 0) {
-    g_source_remove(client->tci_timer);
-    client->tci_timer = 0;
-  }
-}
-
-//
 // Shut down TCI system. Called from CAT/TCI menu
 // if TCI is disabled there.
 //
-void shutdown_tci() {
-  t_print("%s: server_socket=%d\n", __FUNCTION__, server_socket);
+void shutdown_tci(void) {
+  t_print("%s: server_socket=%d\n", __func__, server_socket);
   tci_running = 0;
 
   //
   // Terminate all active TCI connections and join with listener threads
-  // Joining is temporarily disabled until we know why it sometimes hangs
   //
   for (int id = 0; id < MAX_TCI_CLIENTS; id++) {
-    force_close(&tci_client[id]);
-    usleep(100000); // let the client terminate if it can
+    CLIENT *client = &tci_client[id];
+
+    client->running = 0;
+
+    if (client->tci_timer != 0) {
+      g_source_remove(client->tci_timer);
+      client->tci_timer = 0;
+    }
+
+    if (client->fd  != -1) {
+      shutdown(client->fd, SHUT_RDWR);
+      // Give client change to send TCI "Close" message
+      usleep(100000);
+      close(client->fd);
+      client->fd = -1;
+    }
 
     if (tci_client[id].thread_id) {
-      //g_thread_join(tci_client[id].thread_id);
+      g_thread_join(tci_client[id].thread_id);
       tci_client[id].thread_id = NULL;
     }
   }
-
-  usleep(100000);  // Let the TCI thread terminate, if it can
 
   //
   // Forced close of server socket, and join with TCI thread
   //
   if (server_socket >= 0) {
-    struct linger linger = { 0 };
-    linger.l_onoff = 1;
-    linger.l_linger = 0;
-    // No error checking since the socket may be closed
-    // in a race condition by the server thread
-    setsockopt(server_socket, SOL_SOCKET, SO_LINGER, (const char *)&linger, sizeof(linger));
+    shutdown(server_socket, SHUT_RDWR);
     close(server_socket);
     server_socket = -1;
   }
 
   if (tci_server_thread_id) {
-    //g_thread_join(tci_server_thread_id);
+    g_thread_join(tci_server_thread_id);
     tci_server_thread_id = NULL;
   }
 }
@@ -253,7 +234,7 @@ static void tci_send_text(CLIENT *client, const char *msg) {
     return;
   }
 
-  if (rigctl_debug) { t_print("%s: TCI%d response: %s\n", __FUNCTION__, client->seq, msg); }
+  if (rigctl_debug) { t_print("%s: TCI%d response: %s\n", __func__, client->seq, msg); }
 
   RESPONSE *resp = g_new(RESPONSE, 1);
   resp->client = client;
@@ -460,7 +441,7 @@ static void tci_send_rx(CLIENT *client, int v) {
 static void tci_send_close(CLIENT *client) {
   RESPONSE *resp = g_new(RESPONSE, 1);
 
-  if (rigctl_debug) { t_print("%s: TCI%d CLOSE\n", __FUNCTION__, client->seq); }
+  if (rigctl_debug) { t_print("%s: TCI%d CLOSE\n", __func__, client->seq); }
 
   resp->client = client;
   resp->type   = opCLOSE;
@@ -471,7 +452,7 @@ static void tci_send_close(CLIENT *client) {
 static void tci_send_ping(CLIENT *client) {
   RESPONSE *resp = g_new(RESPONSE, 1);
 
-  if (rigctl_debug) { t_print("%s: TCI%d PING\n", __FUNCTION__, client->seq); }
+  if (rigctl_debug) { t_print("%s: TCI%d PING\n", __func__, client->seq); }
 
   resp->client = client;
   resp->type   = opPING;
@@ -482,7 +463,7 @@ static void tci_send_ping(CLIENT *client) {
 static void tci_send_pong(CLIENT *client) {
   RESPONSE *resp = g_new(RESPONSE, 1);
 
-  if (rigctl_debug) { t_print("%s: TCI%d PONG\n", __FUNCTION__, client->seq); }
+  if (rigctl_debug) { t_print("%s: TCI%d PONG\n", __func__, client->seq); }
 
   resp->client = client;
   resp->type   = opPONG;
@@ -569,10 +550,7 @@ static gboolean tci_reporter(gpointer data) {
 static gpointer tci_server(gpointer data) {
   int port = GPOINTER_TO_INT(data);
   int on = 1;
-  struct timeval tv;
-  tv.tv_sec = 0;
-  tv.tv_usec = 100000;
-  t_print("%s: starting TCI server on port %d\n", __FUNCTION__, port);
+  t_print("%s: starting on port %d\n", __func__, port);
   server_socket = socket(AF_INET, SOCK_STREAM, 0);
 
   if (server_socket < 0) {
@@ -580,22 +558,13 @@ static gpointer tci_server(gpointer data) {
     return NULL;
   }
 
-  if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on)) < 0) {
-    t_perror("TCISrvReuseAddr");
-  }
-
-  if (setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on)) < 0) {
-    t_perror("TCISrvReUsePort");
-  }
-
-  if (setsockopt(server_socket, SOL_SOCKET, SO_RCVTIMEO,  &tv, sizeof(tv)) < 0) {
-    t_perror("TCISrvTimeOut");
-  }
+  setsockopt(server_socket, SOL_SOCKET, SO_REUSEADDR, &on, sizeof(on));
+  setsockopt(server_socket, SOL_SOCKET, SO_REUSEPORT, &on, sizeof(on));
 
   // bind to listening port
   memset(&server_address, 0, sizeof(server_address));
   server_address.sin_family = AF_INET;
-  server_address.sin_addr.s_addr = INADDR_ANY;
+  server_address.sin_addr.s_addr = htonl(INADDR_ANY);
   server_address.sin_port = htons(port);
 
   if (bind(server_socket, (struct sockaddr * )&server_address, sizeof(server_address)) < 0) {
@@ -650,15 +619,11 @@ static gpointer tci_server(gpointer data) {
                 &tci_client[spare].address_length);
 
     if (fd < 0) {
-      // Since we have a 0.1 sec time-out, this is normal
+      // This usually means the connection is broken or the TCI server is shut down
       continue;
     }
 
-    t_print("%s: slot= %d connected with fd=%d\n", __FUNCTION__, spare, fd);
-
-    if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,  &tv, sizeof(tv)) < 0) {
-      t_perror("TCIClntSetTimeOut");
-    }
+    t_print("%s: slot= %d connected with fd=%d\n", __func__, spare, fd);
 
     //
     // Setting TCP_NODELAY may (or may not) improve responsiveness
@@ -678,6 +643,12 @@ static gpointer tci_server(gpointer data) {
     // Read from the socket
     //
     nbytes = read(fd, buf, sizeof(buf));
+
+    if (nbytes <= 0) {
+      close(fd);
+      continue;
+    }
+
     buf[nbytes] = 0;
 
     //
@@ -748,6 +719,7 @@ static gpointer tci_server(gpointer data) {
   }
 
   close(server_socket);
+  t_print("%s: terminating\n", __func__);
   return NULL;
 }
 
@@ -767,7 +739,7 @@ static int digest_frame(const unsigned char *buff, char *msg,  int offset, int *
 
   if (len == 127) {
     // Do not even try
-    t_print("%s: excessive length\n", __FUNCTION__);
+    t_print("%s: excessive length\n", __func__);
     return 0;
   }
 
@@ -812,12 +784,12 @@ static int digest_frame(const unsigned char *buff, char *msg,  int offset, int *
 //
 static gpointer tci_listener(gpointer data) {
   CLIENT *client = (CLIENT *)data;
-  t_print("%s: starting client: socket=%d\n", __FUNCTION__, client->fd);
+  t_print("%s: starting client: socket=%d\n", __func__, client->fd);
   int offset = 0;
   unsigned char buff [MAXDATASIZE];
   char msg [MAXDATASIZE];
-  const int ARGLEN = 16;
   int argc;
+#define ARGLEN 16
   char *arg[ARGLEN];
   //
   // Send initial state info to client
@@ -891,7 +863,7 @@ static gpointer tci_listener(gpointer data) {
       switch (type) {
       case opTEXT:
         if (rigctl_debug) {
-          t_print("%s: TCI%d command rcvd=%s\n", __FUNCTION__, client->seq, msg);
+          t_print("%s: TCI%d command rcvd=%s\n", __func__, client->seq, msg);
         }
 
         //
@@ -957,13 +929,13 @@ static gpointer tci_listener(gpointer data) {
         break;
 
       case opPING:
-        if (rigctl_debug) { t_print("%s: TCI%d PING rcvd\n", __FUNCTION__, client->seq); }
+        if (rigctl_debug) { t_print("%s: TCI%d PING rcvd\n", __func__, client->seq); }
 
         tci_send_pong(client);
         break;
 
       case opCLOSE:
-        if (rigctl_debug) { t_print("%s: TCI%d CLOSE rcvd\n", __FUNCTION__, client->seq); }
+        if (rigctl_debug) { t_print("%s: TCI%d CLOSE rcvd\n", __func__, client->seq); }
 
         client->running = 0;
         break;
@@ -985,7 +957,26 @@ static gpointer tci_listener(gpointer data) {
 
   tci_send_text(client, "stop;");
   tci_send_close(client);
-  force_close(client);
-  t_print("%s: leaving thread\n", __FUNCTION__);
+
+  //
+  // We arrive here either because the TCI server is being
+  // shut down, or because we received a CLOSE from the
+  // client.  In the latter case,
+  // it is necessary to release the resources HERE although
+  // this duplicates the code in the shutdown function
+  //
+
+  if (client->tci_timer != 0) {
+    g_source_remove(client->tci_timer);
+    client->tci_timer = 0;
+  }
+
+  if (client->fd  != -1) {
+    t_print("%s: close fd=%d\n", __func__, client->fd);
+    close(client->fd);
+    client->fd = -1;
+  }
+
+  t_print("%s: leaving thread\n", __func__);
   return NULL;
 }

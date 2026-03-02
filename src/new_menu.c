@@ -63,6 +63,7 @@
 #endif
 #include "server_menu.h"
 #include "screen_menu.h"
+#include "sliders_menu.h"
 #include "store_menu.h"
 #include "switch_menu.h"
 #include "toolbar_menu.h"
@@ -76,7 +77,7 @@ GtkWidget *sub_menu = NULL;
 
 int active_menu = NO_MENU;
 
-int menu_active_receiver_changed(void *data) {
+int menu_active_receiver_changed(gpointer data) {
   if (sub_menu != NULL) {
     gtk_widget_destroy(sub_menu);
     sub_menu = NULL;
@@ -85,7 +86,7 @@ int menu_active_receiver_changed(void *data) {
   return FALSE;
 }
 
-static void cleanup() {
+static void cleanup(void) {
   if (main_menu != NULL) {
     gtk_widget_destroy(main_menu);
     main_menu = NULL;
@@ -99,7 +100,7 @@ static void cleanup() {
   active_menu = NO_MENU;
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -114,7 +115,7 @@ static gboolean restart_cb (GtkWidget *widget, GdkEventButton *event, gpointer d
   cleanup();
 
   if (radio_is_remote) {
-    send_restart(client_socket);
+    send_restart(cl_sock_tcp);
   } else {
     radio_protocol_restart();
   }
@@ -128,7 +129,7 @@ static gboolean restart_cb (GtkWidget *widget, GdkEventButton *event, gpointer d
 //
 static gboolean minimize_cb(GtkWidget *widget, GdkEventButton *event, gpointer data) {
   cleanup();
-  gtk_window_iconify(GTK_WINDOW(top_window));
+  radio_iconify();
   return TRUE;
 }
 
@@ -155,14 +156,13 @@ static gboolean exit_cb (GtkWidget *widget, GdkEventButton *event, gpointer data
 }
 
 static gboolean radio_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  cleanup();
-  radio_menu(top_window);
+  start_radio_menu();
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean rx_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_rx();
+  start_rx_menu();
   return TRUE;
 }
 
@@ -205,15 +205,23 @@ static gboolean switch_cb (GtkWidget *widget, GdkEventButton *event, gpointer da
 
 #endif
 
+#ifdef SATURN
 static gboolean g2panel_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
   cleanup();
   g2panel_menu(top_window);
   return TRUE;
 }
+#endif
 
 static gboolean toolbar_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
   cleanup();
   toolbar_menu(top_window);
+  return TRUE;
+}
+
+static gboolean sliders_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
+  cleanup();
+  sliders_menu(top_window);
   return TRUE;
 }
 
@@ -241,23 +249,28 @@ static gboolean equaliser_cb (GtkWidget *widget, GdkEventButton *event, gpointer
   return TRUE;
 }
 
-void start_rx() {
+void start_radio_menu(void) {
+  cleanup();
+  radio_menu(top_window);
+}
+
+void start_rx_menu(void) {
   cleanup();
   rx_menu(top_window);
 }
 
-void start_meter() {
+void start_meter_menu(void) {
   cleanup();
   meter_menu(top_window);
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean meter_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_meter();
+  start_meter_menu();
   return TRUE;
 }
 
-void start_band() {
+void start_band_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -267,7 +280,7 @@ void start_band() {
   }
 }
 
-void start_bandstack() {
+void start_bandstack_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -277,7 +290,7 @@ void start_bandstack() {
   }
 }
 
-void start_mode() {
+void start_mode_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -287,7 +300,7 @@ void start_mode() {
   }
 }
 
-void start_filter() {
+void start_filter_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -299,47 +312,47 @@ void start_filter() {
 
 // cppcheck-suppress constParameterCallback
 static gboolean mode_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_mode();
+  start_mode_menu();
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean filter_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_filter();
+  start_filter_menu();
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean noise_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_noise();
+  start_noise_menu();
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean vfo_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_vfo(active_receiver->id);
+  start_vfo_menu(active_receiver->id);
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean band_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_band();
+  start_band_menu();
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean bstk_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_bandstack();
+  start_bandstack_menu();
   return TRUE;
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean store_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_store();
+  start_store_menu();
   return TRUE;
 }
 
-void start_noise() {
+void start_noise_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -351,11 +364,11 @@ void start_noise() {
 
 // cppcheck-suppress constParameterCallback
 static gboolean agc_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_agc();
+  start_agc_menu();
   return TRUE;
 }
 
-void start_agc() {
+void start_agc_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -365,29 +378,29 @@ void start_agc() {
   }
 }
 
-static void start_vox() {
+static void start_vox_menu(void) {
   cleanup();
   vox_menu(top_window);
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean vox_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_vox();
+  start_vox_menu();
   return TRUE;
 }
 
-static void start_dsp() {
+static void start_dsp_menu(void) {
   cleanup();
   fft_menu(top_window);
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean dsp_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_dsp();
+  start_dsp_menu();
   return TRUE;
 }
 
-void start_diversity() {
+void start_diversity_menu(void) {
   cleanup();
   diversity_menu(top_window);
 }
@@ -400,11 +413,11 @@ static gboolean screen_cb (GtkWidget *widget, GdkEventButton *event, gpointer da
 
 // cppcheck-suppress constParameterCallback
 static gboolean diversity_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_diversity();
+  start_diversity_menu();
   return TRUE;
 }
 
-void start_vfo(int vfo) {
+void start_vfo_menu(int vfo) {
   int old_menu = active_menu;
   cleanup();
 
@@ -414,7 +427,7 @@ void start_vfo(int vfo) {
   }
 }
 
-void start_store() {
+void start_store_menu(void) {
   int old_menu = active_menu;
   cleanup();
 
@@ -424,7 +437,7 @@ void start_store() {
   }
 }
 
-void start_tx() {
+void start_tx_menu(void) {
   cleanup();
 
   if (can_transmit) {
@@ -434,11 +447,11 @@ void start_tx() {
 
 // cppcheck-suppress constParameterCallback
 static gboolean tx_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_tx();
+  start_tx_menu();
   return TRUE;
 }
 
-void start_ps() {
+void start_ps_menu(void) {
   cleanup();
 
   if (can_transmit) {
@@ -448,36 +461,36 @@ void start_ps() {
 
 // cppcheck-suppress constParameterCallback
 static gboolean ps_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_ps();
+  start_ps_menu();
   return TRUE;
 }
 
-void start_server() {
+void start_server_menu(void) {
   cleanup();
   server_menu(top_window);
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean server_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_server();
+  start_server_menu();
   return TRUE;
 }
 
 #ifdef MIDI
-static void start_midi() {
+static void start_midi_menu(void) {
   cleanup();
   midi_menu(top_window);
 }
 
 // cppcheck-suppress constParameterCallback
 static gboolean midi_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
-  start_midi();
+  start_midi_menu();
   return TRUE;
 }
 
 #endif
 
-void new_menu() {
+void new_menu(void) {
   int col, row, maxrow;
 
   if (sub_menu != NULL) {
@@ -547,7 +560,10 @@ void new_menu() {
     row++;
 #ifdef SATURN
 
-    if (have_saturn_xdma) { // only display on the xdma client
+    //
+    // This button only exists if we are running a radio via XDMA
+    //
+    if (have_saturn_xdma) {
       GtkWidget *saturn_b = gtk_button_new_with_label("Saturn");
       g_signal_connect (saturn_b, "button-press-event", G_CALLBACK(saturn_cb), NULL);
       gtk_grid_attach(GTK_GRID(grid), saturn_b, col, row, 1, 1);
@@ -691,11 +707,15 @@ void new_menu() {
     col++;
     //
     // Sixth column: Menus for controlling piHPSDR
-    //               Toolbar, RigCtl, MIDI, Encoders, Switches
+    //               Toolbar, Sliders, RigCtl, MIDI, Encoders, Switches
     //
     GtkWidget *toolbar_b = gtk_button_new_with_label("Toolbar");
     g_signal_connect (toolbar_b, "button-press-event", G_CALLBACK(toolbar_cb), NULL);
     gtk_grid_attach(GTK_GRID(grid), toolbar_b, col, row, 1, 1);
+    row++;
+    GtkWidget *sliders_b = gtk_button_new_with_label("Sliders");
+    g_signal_connect (sliders_b, "button-press-event", G_CALLBACK(sliders_cb), NULL);
+    gtk_grid_attach(GTK_GRID(grid), sliders_b, col, row, 1, 1);
     row++;
     GtkWidget *rigctl_b = gtk_button_new_with_label("CAT/TCI");
     g_signal_connect (rigctl_b, "button-press-event", G_CALLBACK(rigctl_cb), NULL);
@@ -709,7 +729,7 @@ void new_menu() {
 #endif
 #ifdef GPIO
 
-    if (controller != NO_CONTROLLER && controller != G2_V2) {
+    if (controller != NO_CONTROLLER) {
       GtkWidget *encoders_b = gtk_button_new_with_label("Encoders");
       g_signal_connect (encoders_b, "button-press-event", G_CALLBACK(encoder_cb), NULL);
       gtk_grid_attach(GTK_GRID(grid), encoders_b, col, row, 1, 1);
@@ -719,7 +739,7 @@ void new_menu() {
     //
     // Note the switches of CONTROLLER1 are assigned via the Toolbar menu
     //
-    if (controller != NO_CONTROLLER && controller != CONTROLLER1 && controller != G2_V2) {
+    if (controller != NO_CONTROLLER && controller != CONTROLLER1) {
       GtkWidget *switches_b = gtk_button_new_with_label("Switches");
       g_signal_connect (switches_b, "button-press-event", G_CALLBACK(switch_cb), NULL);
       gtk_grid_attach(GTK_GRID(grid), switches_b, col, row, 1, 1);
@@ -728,12 +748,14 @@ void new_menu() {
 
 #endif
 
-    if (controller == G2_V2) {
+#ifdef SATURN
+    if (have_g2v2) {
       GtkWidget *g2panel_b = gtk_button_new_with_label("G2 Panel");
       g_signal_connect (g2panel_b, "button-press-event", G_CALLBACK(g2panel_cb), NULL);
       gtk_grid_attach(GTK_GRID(grid), g2panel_b, col, row, 1, 1);
       row++;
     }
+#endif
 
     // cppcheck-suppress redundantAssignment
     row = maxrow;

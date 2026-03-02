@@ -18,14 +18,8 @@
 */
 
 #include <gtk/gtk.h>
-#include <semaphore.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "client_server.h"
-#include "display_menu.h"
 #include "main.h"
 #include "new_menu.h"
 #include "radio.h"
@@ -51,7 +45,7 @@ static GtkWidget *peaks_container;
 //
 static RECEIVER *myrx;
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -62,7 +56,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -120,7 +114,7 @@ static void detector_cb(GtkToggleButton *widget, gpointer data) {
   }
 
   if (radio_is_remote) {
-    send_display(client_socket, myrx->id);
+    send_display(cl_sock_tcp, myrx->id);
   } else {
     rx_set_detector(myrx);
   }
@@ -148,7 +142,7 @@ static void average_cb(GtkToggleButton *widget, gpointer data) {
   }
 
   if (radio_is_remote) {
-    send_display(client_socket, myrx->id);
+    send_display(cl_sock_tcp, myrx->id);
   } else {
     rx_set_average(myrx);
   }
@@ -162,7 +156,7 @@ static void time_value_changed_cb(GtkWidget *widget, gpointer data) {
   myrx->display_average_time = gtk_spin_button_get_value(GTK_SPIN_BUTTON(widget));
 
   if (radio_is_remote) {
-    send_display(client_socket, myrx->id);
+    send_display(cl_sock_tcp, myrx->id);
   } else {
     rx_set_average(myrx);
   }
@@ -188,22 +182,25 @@ static void frames_per_second_value_changed_cb(GtkWidget *widget, gpointer data)
   myrx->fps = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
 
   if (radio_is_remote) {
-    send_rxfps(client_socket, myrx->id, myrx->fps);
+    send_rxfps(cl_sock_tcp, myrx->id, myrx->fps);
   } else {
     rx_set_framerate(myrx);
   }
 }
 
 static void panadapter_high_value_changed_cb(GtkWidget *widget, gpointer data) {
-  myrx->panadapter_high = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+  int value = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+  radio_set_panhigh(myrx->id, value);
 }
 
 static void panadapter_low_value_changed_cb(GtkWidget *widget, gpointer data) {
-  myrx->panadapter_low = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+  int value = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+  radio_set_panlow(myrx->id, value);
 }
 
 static void panadapter_step_value_changed_cb(GtkWidget *widget, gpointer data) {
-  myrx->panadapter_step = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+  int value = gtk_spin_button_get_value_as_int(GTK_SPIN_BUTTON(widget));
+  radio_set_panstep(myrx->id, value);
 }
 
 static void panadapter_num_peaks_value_changed_cb(GtkWidget *widget, gpointer data) {
@@ -310,7 +307,7 @@ void display_menu(GtkWidget *parent) {
   gtk_container_add(GTK_CONTAINER(general_container), general_grid);
   row = 0;
   col = 0;
-  label = gtk_label_new("Frames Per Second:");
+  label = gtk_label_new("Frames Per Second");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -321,7 +318,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(frames_per_second_r, "value_changed", G_CALLBACK(frames_per_second_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Panadapter High:");
+  label = gtk_label_new("Panadapter High");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -332,7 +329,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(panadapter_high_r, "value_changed", G_CALLBACK(panadapter_high_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Panadapter Low:");
+  label = gtk_label_new("Panadapter Low");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -343,7 +340,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(panadapter_low_r, "value_changed", G_CALLBACK(panadapter_low_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Panadapter Step:");
+  label = gtk_label_new("Panadapter Step");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -354,7 +351,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(panadapter_step_r, "value_changed", G_CALLBACK(panadapter_step_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Waterfall High:");
+  label = gtk_label_new("Waterfall High");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -365,7 +362,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(waterfall_high_r, "value_changed", G_CALLBACK(waterfall_high_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Waterfall Low:");
+  label = gtk_label_new("Waterfall Low");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -376,7 +373,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(waterfall_low_r, "value_changed", G_CALLBACK(waterfall_low_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Waterfall Automatic:");
+  label = gtk_label_new("Waterfall Automatic");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -386,7 +383,7 @@ void display_menu(GtkWidget *parent) {
   gtk_grid_attach(GTK_GRID(general_grid), waterfall_automatic_b, col, row, 1, 1);
   g_signal_connect(waterfall_automatic_b, "toggled", G_CALLBACK(waterfall_automatic_cb), NULL);
   col++;
-  label = gtk_label_new("Waterfall Height (%):");
+  label = gtk_label_new("Waterfall Height (%)");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -397,7 +394,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(waterfall_percent, "value-changed", G_CALLBACK(waterfall_percent_cb), NULL);
   col = 2;
   row = 1;
-  label = gtk_label_new("Detector:");
+  label = gtk_label_new("Detector");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -459,7 +456,7 @@ void display_menu(GtkWidget *parent) {
   my_combo_attach(GTK_GRID(general_grid), average_combo, col + 1, row, 1, 1);
   g_signal_connect(average_combo, "changed", G_CALLBACK(average_cb), NULL);
   row++;
-  label = gtk_label_new("Av. Time (ms):");
+  label = gtk_label_new("Av. Time (ms)");
   gtk_widget_set_name (label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(general_grid), label, col, row, 1, 1);
@@ -515,7 +512,7 @@ void display_menu(GtkWidget *parent) {
   gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(b_pan_hide_noise), myrx->panadapter_hide_noise_filled);
   gtk_grid_attach(GTK_GRID(peaks_grid), b_pan_hide_noise, col, ++row, 1, 1);
   g_signal_connect(b_pan_hide_noise, "toggled", G_CALLBACK(panadapter_hide_noise_filled_cb), NULL);
-  label = gtk_label_new("Number of Peaks to Label:");
+  label = gtk_label_new("Number of Peaks to Label");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(peaks_grid), label, col, ++row, 1, 1);
@@ -526,7 +523,7 @@ void display_menu(GtkWidget *parent) {
   g_signal_connect(panadapter_num_peaks_r, "value_changed", G_CALLBACK(panadapter_num_peaks_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Ignore Adjacent Peaks:");
+  label = gtk_label_new("Ignore Adjacent Peaks");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(peaks_grid), label, col, row, 1, 1);
@@ -539,7 +536,7 @@ void display_menu(GtkWidget *parent) {
                    G_CALLBACK(panadapter_ignore_range_divider_value_changed_cb), NULL);
   row++;
   col = 0;
-  label = gtk_label_new("Noise Floor Percentile:");
+  label = gtk_label_new("Noise Floor Percentile");
   gtk_widget_set_name(label, "boldlabel");
   gtk_widget_set_halign(label, GTK_ALIGN_END);
   gtk_grid_attach(GTK_GRID(peaks_grid), label, col, row, 1, 1);

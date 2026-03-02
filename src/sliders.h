@@ -24,13 +24,24 @@
 #include "transmitter.h"
 #include "actions.h"
 
-extern GtkWidget *sliders_init(int my_width, int my_height);
+#define MAX_ZOOM 32
+#define NUM_SLIDERS 9
 
-void show_popup_slider(enum ACTION action, int rx, double min, double max, double delta, double value,
-                       const char *title);
+extern enum ACTION slider_functions[NUM_SLIDERS];
 
-extern int sliders_active_receiver_changed(void *data);
-extern int sliders_att_type_changed(void *data);
+extern void sliders_save_state(void);
+extern void sliders_restore_state(void);
+
+void queue_popup_slider(enum ACTION action, int rx, double min, double max, double delta, double value,
+                        const char *title);
+
+extern void sliders_show_zoompan(int y);
+extern void sliders_show_sliders(int y);
+extern void sliders_create(int width, int height, int rows);
+extern void sliders_destroy(void);
+
+extern int sliders_active_receiver_changed(gpointer data);
+extern int sliders_att_type_changed(gpointer data);
 
 //
 // These functions ONLY move the sliders
@@ -45,8 +56,14 @@ extern int sliders_rf_gain(gpointer data);
 extern int sliders_attenuation(gpointer data);
 extern int sliders_c25_att(gpointer data);
 extern int sliders_squelch(gpointer data);
+extern int sliders_cmpr(gpointer data);
+extern int sliders_vox(gpointer data);
 extern int sliders_mic_gain(gpointer data);
 extern int sliders_linein_gain(gpointer data);
 extern int sliders_drive(gpointer data);
 extern int sliders_diversity_gain(gpointer data);
 extern int sliders_diversity_phase(gpointer data);
+extern int sliders_zoom(gpointer data);
+extern int sliders_pan(gpointer data);
+extern int sliders_panlow(gpointer data);
+extern int sliders_wpm(gpointer data);

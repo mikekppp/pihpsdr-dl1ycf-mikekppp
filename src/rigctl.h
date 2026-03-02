@@ -30,7 +30,7 @@ struct _SERIALPORT {
   //
   char port[64];    // e.g. "/dev/ttyACM0"
   speed_t  speed;   // baud rate (encoded as a speed_t)
-  int  enable;      // is it enabled?
+  int  enable;      // enabled for CAT/ANDROMEDA/PTT ?
   int  andromeda;   // flag for handling ANDROMEDA console
   int  g2;          // This port is used for G2-internal communication
   int  autoreporting;
@@ -38,17 +38,24 @@ struct _SERIALPORT {
 
 typedef struct _SERIALPORT SERIALPORT;
 
+extern char predef_cwtxt[5][256];
+extern char predef_call[256];
+
 #define MAX_SERIAL 3
-extern SERIALPORT SerialPorts[MAX_SERIAL];
+extern SERIALPORT SerialPorts[MAX_SERIAL+1];  // one extra for "PTT"
 extern gboolean rigctl_debug;
 
 extern void launch_tcp_rigctl (void);
 extern int launch_serial_rigctl (int id);
+extern int launch_serial_ptt (int id);
 extern void disable_serial_rigctl (int id);
-extern int rigctl_tcp_running();
+extern void disable_serial_ptt (int id);
+extern int rigctl_tcp_running(void);
 extern void  shutdown_tcp_rigctl(void);
-extern void rigctlSaveState(void);
-extern void rigctlRestoreState(void);
+extern void rigctl_save_state(void);
+extern void rigctl_restore_state(void);
+extern void rigctl_start_cw_thread(void);
+extern void rigctl_send_cw_text(int pos);
 
 extern int cat_control;
 extern unsigned int rigctl_tcp_port;

@@ -34,7 +34,6 @@
 #include "gpio.h"
 #include "message.h"
 #include "mode.h"
-#include "new_menu.h"
 #include "radio.h"
 #include "receiver.h"
 #include "rx_panadapter.h"
@@ -88,7 +87,7 @@ tx_panadapter_draw_cb (GtkWidget *widget,
 static gboolean tx_panadapter_button_press_event_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
   switch (event->button) {
   case GDK_BUTTON_SECONDARY:
-    g_idle_add(ext_start_tx, NULL);
+    g_idle_add(ext_start_tx_menu, NULL);
     break;
 
   default:
@@ -383,7 +382,7 @@ void tx_panadapter_update(TRANSMITTER *tx) {
 
       if (hide_noise) {
         // Dynamically allocate a copy of samples for sorting
-        double *sorted_samples = malloc(mywidth * sizeof(double));
+        double *sorted_samples = g_new(double, mywidth);
 
         if (sorted_samples != NULL) {
           for (int i = 0; i < mywidth; i++) {
@@ -393,7 +392,7 @@ void tx_panadapter_update(TRANSMITTER *tx) {
           qsort(sorted_samples, mywidth, sizeof(double), compare_doubles);
           int index = (int)((noise_percentile / 100.0) * mywidth);
           noise_level = sorted_samples[index] + 3.0;
-          free(sorted_samples); // Free memory after use
+          g_free(sorted_samples);
         }
       }
 
@@ -539,7 +538,7 @@ void tx_panadapter_update(TRANSMITTER *tx) {
 }
 
 void tx_panadapter_init(TRANSMITTER *tx, int width, int height) {
-  t_print("%s: %d x %d\n", __FUNCTION__, width, height);
+  t_print("%s: %d x %d\n", __func__, width, height);
   tx->panadapter_surface = NULL;
   tx->panadapter = gtk_drawing_area_new ();
   gtk_widget_set_size_request (tx->panadapter, width, height);

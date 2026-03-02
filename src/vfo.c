@@ -32,6 +32,7 @@
 #include <ifaddrs.h>
 
 #include "appearance.h"
+#include "audio.h"
 #include "discovered.h"
 #include "main.h"
 #include "agc.h"
@@ -47,14 +48,11 @@
 #include "vfo.h"
 #include "channel.h"
 #include "toolbar.h"
-#include "new_menu.h"
 #include "rigctl.h"
 #include "client_server.h"
 #include "ext.h"
 #include "filter.h"
 #include "actions.h"
-#include "noise_menu.h"
-#include "equalizer_menu.h"
 #include "message.h"
 #include "sliders.h"
 
@@ -85,7 +83,7 @@ static inline long long ROUND(long long freq, int nsteps, int step) {
 struct _vfo vfo[MAX_VFOS];
 struct _mode_settings mode_settings[MODES];
 
-static void vfo_save_bandstack() {
+static void vfo_save_bandstack(void) {
   BANDSTACK *bandstack = bandstack_get_bandstack(vfo[0].band);
   bandstack->current_entry = vfo[0].bandstack;
   BANDSTACK_ENTRY *entry = &bandstack->entry[vfo[0].bandstack];
@@ -102,9 +100,7 @@ static void vfo_save_bandstack() {
   }
 }
 
-static void modesettingsSaveState() {
-  ASSERT_SERVER();
-
+void modesettings_save_state(void) {
   for (int i = 0; i < MODES; i++) {
     SetPropI1("modeset.%d.filter", i,                 mode_settings[i].filter);
     SetPropI1("modeset.%d.cwPeak", i,                 mode_settings[i].cwPeak);
@@ -120,16 +116,21 @@ static void modesettingsSaveState() {
     SetPropI1("modeset.%d.nr_agc", i,                 mode_settings[i].nr_agc);
     SetPropI1("modeset.%d.nr2_gain_method", i,        mode_settings[i].nr2_gain_method);
     SetPropI1("modeset.%d.nr2_npe_method", i,         mode_settings[i].nr2_npe_method);
-    SetPropI1("modeset.%d.nr2_ae", i,                 mode_settings[i].nr2_ae);
     SetPropF1("modeset.%d.nr2_trained_threshold", i,  mode_settings[i].nr2_trained_threshold);
     SetPropF1("modeset.%d.nr2_trained_t2", i,         mode_settings[i].nr2_trained_t2);
-#ifdef EXTNR
+    SetPropI1("modeset.%d.nr2_post", i,               mode_settings[i].nr2_post);
+    SetPropI1("modeset.%d.nr2_post_taper", i,         mode_settings[i].nr2_post_taper);
+    SetPropI1("modeset.%d.nr2_post_nlevel", i,        mode_settings[i].nr2_post_nlevel);
+    SetPropI1("modeset.%d.nr2_post_factor", i,        mode_settings[i].nr2_post_factor);
+    SetPropI1("modeset.%d.nr2_post_rate", i,          mode_settings[i].nr2_post_rate);
     SetPropF1("modeset.%d.nr4_reduction_amount", i,   mode_settings[i].nr4_reduction_amount);
     SetPropF1("modeset.%d.nr4_smoothing_factor", i,   mode_settings[i].nr4_smoothing_factor);
     SetPropF1("modeset.%d.nr4_whitening_factor", i,   mode_settings[i].nr4_whitening_factor);
     SetPropF1("modeset.%d.nr4_noise_rescale", i,      mode_settings[i].nr4_noise_rescale);
     SetPropF1("modeset.%d.nr4_post_threshold", i,     mode_settings[i].nr4_post_threshold);
-#endif
+    SetPropI1("modeset.%d.nr4_noise_scaling_type", i, mode_settings[i].nr4_noise_scaling_type);
+    SetPropI1("modeset.%d.en_squelch", i,             mode_settings[i].squelch_enable);
+    SetPropF1("modeset.%d.squelch", i,                mode_settings[i].squelch);
     SetPropI1("modeset.%d.anf", i,                    mode_settings[i].anf);
     SetPropI1("modeset.%d.snb", i,                    mode_settings[i].snb);
     SetPropI1("modeset.%d.agc", i,                    mode_settings[i].agc);
@@ -164,12 +165,16 @@ static void modesettingsSaveState() {
       SetPropF2("modeset.%d.cfc_lvl.%d", i, j,        mode_settings[i].cfc_lvl[j]);
       SetPropF2("modeset.%d.cfc_post.%d", i, j,       mode_settings[i].cfc_post[j]);
     }
+
+    SetPropI1("modeset.%d.rx_audio_channel", i,       mode_settings[i].rx_audio_channel);
+    SetPropI1("modeset.%d.rx_local_audio", i,         mode_settings[i].rx_local_audio);
+    SetPropI1("modeset.%d.tx_local_audio", i,         mode_settings[i].tx_local_audio);
+    SetPropS1("modeset.%d.rx_audio_name", i,          mode_settings[i].rx_audio_name);
+    SetPropS1("modeset.%d.tx_audio_name", i,          mode_settings[i].tx_audio_name);
   }
 }
 
-static void modesettingsRestoreState() {
-  ASSERT_SERVER();
-
+void modesettings_restore_state(void) {
   for (int i = 0; i < MODES; i++) {
     //
     // set defaults that depend on  the mode: filter, agc, step
@@ -226,16 +231,21 @@ static void modesettingsRestoreState() {
     mode_settings[i].nr_agc = 0;
     mode_settings[i].nr2_gain_method = 0;
     mode_settings[i].nr2_npe_method = 0;
-    mode_settings[i].nr2_ae = 1;
+    mode_settings[i].nr2_post = 0;
+    mode_settings[i].nr2_post_taper = 12;
+    mode_settings[i].nr2_post_nlevel = 15;
+    mode_settings[i].nr2_post_factor = 15;
+    mode_settings[i].nr2_post_rate = 5;
     mode_settings[i].nr2_trained_threshold = -0.5;
     mode_settings[i].nr2_trained_t2 = 0.2;
-#ifdef EXTNR
     mode_settings[i].nr4_reduction_amount = 10.0;
-    mode_settings[i].nr4_smoothing_factor = 0.0;
+    mode_settings[i].nr4_smoothing_factor = 20.0;
     mode_settings[i].nr4_whitening_factor = 0.0;
     mode_settings[i].nr4_noise_rescale = 2.0;
-    mode_settings[i].nr4_post_threshold = 2.0;
-#endif
+    mode_settings[i].nr4_post_threshold = -3.0;
+    mode_settings[i].nr4_noise_scaling_type = 0;
+    mode_settings[i].squelch_enable = 0;
+    mode_settings[i].squelch = 0.0;
     mode_settings[i].anf = 0;
     mode_settings[i].snb = 0;
     mode_settings[i].en_rxeq = 0;
@@ -300,6 +310,11 @@ static void modesettingsRestoreState() {
     mode_settings[i].tx_eq_freq[10] =  5000.0;
     mode_settings[i].rx_eq_freq[10] =  5000.0;
     mode_settings[i].cfc_freq  [10] =  5000.0;
+    mode_settings[i].rx_audio_channel =  STEREO;
+    mode_settings[i].rx_local_audio =  0;
+    mode_settings[i].tx_local_audio =  0;
+    snprintf(mode_settings[i].rx_audio_name, sizeof(mode_settings[i].rx_audio_name), "%s", "NO AUDIO");
+    snprintf(mode_settings[i].tx_audio_name, sizeof(mode_settings[i].tx_audio_name), "%s", "NO AUDIO");
     GetPropI1("modeset.%d.filter", i,                 mode_settings[i].filter);
     GetPropI1("modeset.%d.cwPeak", i,                 mode_settings[i].cwPeak);
     GetPropI1("modeset.%d.step", i,                   mode_settings[i].step);
@@ -314,16 +329,21 @@ static void modesettingsRestoreState() {
     GetPropI1("modeset.%d.nr_agc", i,                 mode_settings[i].nr_agc);
     GetPropI1("modeset.%d.nr2_gain_method", i,        mode_settings[i].nr2_gain_method);
     GetPropI1("modeset.%d.nr2_npe_method", i,         mode_settings[i].nr2_npe_method);
-    GetPropI1("modeset.%d.nr2_ae", i,                 mode_settings[i].nr2_ae);
     GetPropF1("modeset.%d.nr2_trained_threshold", i,  mode_settings[i].nr2_trained_threshold);
     GetPropF1("modeset.%d.nr2_trained_t2", i,         mode_settings[i].nr2_trained_t2);
-#ifdef EXTNR
+    GetPropI1("modeset.%d.nr2_post", i,               mode_settings[i].nr2_post);
+    GetPropI1("modeset.%d.nr2_post_taper", i,         mode_settings[i].nr2_post_taper);
+    GetPropI1("modeset.%d.nr2_post_nlevel", i,        mode_settings[i].nr2_post_nlevel);
+    GetPropI1("modeset.%d.nr2_post_factor", i,        mode_settings[i].nr2_post_factor);
+    GetPropI1("modeset.%d.nr2_post_rate", i,          mode_settings[i].nr2_post_rate);
     GetPropF1("modeset.%d.nr4_reduction_amount", i,   mode_settings[i].nr4_reduction_amount);
     GetPropF1("modeset.%d.nr4_smoothing_factor", i,   mode_settings[i].nr4_smoothing_factor);
     GetPropF1("modeset.%d.nr4_whitening_factor", i,   mode_settings[i].nr4_whitening_factor);
     GetPropF1("modeset.%d.nr4_noise_rescale", i,      mode_settings[i].nr4_noise_rescale);
     GetPropF1("modeset.%d.nr4_post_threshold", i,     mode_settings[i].nr4_post_threshold);
-#endif
+    GetPropI1("modeset.%d.nr4_noise_scaling_type", i, mode_settings[i].nr4_noise_scaling_type);
+    GetPropI1("modeset.%d.en_squelch", i,             mode_settings[i].squelch_enable);
+    GetPropF1("modeset.%d.squelch", i,                mode_settings[i].squelch);
     GetPropI1("modeset.%d.anf", i,                    mode_settings[i].anf);
     GetPropI1("modeset.%d.snb", i,                    mode_settings[i].snb);
     GetPropI1("modeset.%d.agc", i,                    mode_settings[i].agc);
@@ -358,11 +378,19 @@ static void modesettingsRestoreState() {
       GetPropF2("modeset.%d.cfc_lvl.%d", i, j,        mode_settings[i].cfc_lvl[j]);
       GetPropF2("modeset.%d.cfc_post.%d", i, j,       mode_settings[i].cfc_post[j]);
     }
+
+    GetPropI1("modeset.%d.rx_audio_channel", i,       mode_settings[i].rx_audio_channel);
+    GetPropI1("modeset.%d.rx_local_audio", i,         mode_settings[i].rx_local_audio);
+    GetPropI1("modeset.%d.tx_local_audio", i,         mode_settings[i].tx_local_audio);
+    GetPropS1("modeset.%d.rx_audio_name", i,          mode_settings[i].rx_audio_name);
+    GetPropS1("modeset.%d.tx_audio_name", i,          mode_settings[i].tx_audio_name);
   }
 }
 
 void copy_mode_settings(int mode) {
-  ASSERT_SERVER();
+  //
+  // The client may call this, if local audio settings have been changed
+  //
 
   //
   // If mode is USB or LSB or DSB, copy settings of that mode to USB and LSB and DSB
@@ -392,7 +420,7 @@ void copy_mode_settings(int mode) {
   }
 }
 
-void vfo_save_state() {
+void vfo_save_state(void) {
   ASSERT_SERVER();
   vfo_save_bandstack();
 
@@ -414,11 +442,9 @@ void vfo_save_state() {
     SetPropI1("vfo.%d.step", i,             vfo[i].step);
     SetPropI1("vfo.%d.rit_step", i,         vfo[i].rit_step);
   }
-
-  modesettingsSaveState();
 }
 
-void vfo_restore_state() {
+void vfo_restore_state(void) {
   ASSERT_SERVER();
 
   for (int i = 0; i < MAX_VFOS; i++) {
@@ -475,8 +501,6 @@ void vfo_restore_state() {
       vfo[i].offset = 0;
     }
   }
-
-  modesettingsRestoreState();
 }
 
 static inline void vfo_id_adjust_band(int v, long long f) {
@@ -518,19 +542,23 @@ static inline void vfo_id_adjust_band(int v, long long f) {
   // since one cycles through ALL bands.
   // bandAir is changed to bandGen if we move away from
   // one of the six WWV frequencies,
-  // bandGen is changed to another band if we enter
-  // the frequency range of the latter.
+  // bandGen is changed to another band if (and only if)
+  // we enter the frequency range of the latter.
   //
   // NOTE: you loose the LO offset when moving > 25kHz
   //       out of a transverter band!
   //
-  vfo[v].band = get_band_from_frequency(f);
-  bandstack = bandstack_get_bandstack(vfo[v].band);
-  vfo[v].bandstack = bandstack->current_entry;
-  radio_apply_band_settings(1);
+  int new_band = get_band_from_frequency(f);
+
+  if (b != new_band) {
+    vfo[v].band = get_band_from_frequency(f);
+    bandstack = bandstack_get_bandstack(vfo[v].band);
+    vfo[v].bandstack = bandstack->current_entry;
+    radio_apply_band_settings(1, v);
+  }
 }
 
-void vfo_xvtr_changed() {
+void vfo_xvtr_changed(void) {
   ASSERT_SERVER();
 
   //
@@ -579,6 +607,7 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
   int id, m;
   id = rx->id;
   m = vfo[id].mode;
+  suppress_popup_sliders++;
   //
   // Apply VFO settings to VFO controlling the receiver
   //
@@ -600,16 +629,19 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
   rx->nr_agc                    = mode_settings[m].nr_agc;
   rx->nr2_gain_method           = mode_settings[m].nr2_gain_method;
   rx->nr2_npe_method            = mode_settings[m].nr2_npe_method;
-  rx->nr2_ae                    = mode_settings[m].nr2_ae;
   rx->nr2_trained_threshold     = mode_settings[m].nr2_trained_threshold;
   rx->nr2_trained_t2            = mode_settings[m].nr2_trained_t2;
-#ifdef EXTNR
+  rx->nr2_post                  = mode_settings[m].nr2_post;
+  rx->nr2_post_taper            = mode_settings[m].nr2_post_taper;
+  rx->nr2_post_nlevel           = mode_settings[m].nr2_post_nlevel;
+  rx->nr2_post_factor           = mode_settings[m].nr2_post_factor;
+  rx->nr2_post_rate             = mode_settings[m].nr2_post_rate;
   rx->nr4_reduction_amount      = mode_settings[m].nr4_reduction_amount;
   rx->nr4_smoothing_factor      = mode_settings[m].nr4_smoothing_factor;
   rx->nr4_whitening_factor      = mode_settings[m].nr4_whitening_factor;
   rx->nr4_noise_rescale         = mode_settings[m].nr4_noise_rescale;
   rx->nr4_post_threshold        = mode_settings[m].nr4_post_threshold;
-#endif
+  rx->nr4_noise_scaling_type    = mode_settings[m].nr4_noise_scaling_type;
   rx->anf                       = mode_settings[m].anf;
   rx->snb                       = mode_settings[m].snb;
   rx->agc                       = mode_settings[m].agc;
@@ -623,6 +655,34 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
   rx_set_agc(rx);
   rx_set_equalizer(rx);
   rx_set_noise(rx);
+  radio_set_squelch       (rx->id, mode_settings[m].squelch);
+  radio_set_squelch_enable(rx->id, mode_settings[m].squelch_enable);
+
+  if (rx->id == 0) {
+    rx->audio_channel = mode_settings[m].rx_audio_channel;
+
+    if (rx->local_audio != mode_settings[m].rx_local_audio
+                    || strncmp(rx->audio_name, mode_settings[m].rx_audio_name, sizeof(rx->audio_name))) {
+      //
+      // This is RX1 and local audio settings in mode_settings differ from actual settings
+      //
+      if (rx->local_audio) {
+        rx->local_audio = 0;
+        audio_close_output(rx);
+      }
+
+      if (mode_settings[m].rx_local_audio) {
+        snprintf(rx->audio_name, sizeof(rx->audio_name), "%s", mode_settings[m].rx_audio_name);
+
+        if (audio_open_output(rx) < 0) {
+          rx->local_audio = 0;
+          t_print("%s: Open audio output failed\n", __func__);
+        } else {
+          rx->local_audio = 1;
+        }
+      }
+    }
+  }
 
   //
   // Transmitter-specific settings: TXEQ, CMRP, DEXP, CFC
@@ -661,17 +721,38 @@ void vfo_apply_mode_settings(RECEIVER *rx) {
     tx_set_compressor(transmitter);
     tx_set_dexp(transmitter);
     tx_set_equalizer(transmitter);
-    suppress_popup_sliders = 1;
     radio_set_mic_gain(mode_settings[m].mic_gain);
-    suppress_popup_sliders = 0;
+
+    if (transmitter->local_audio != mode_settings[m].tx_local_audio ||
+        strncmp(transmitter->audio_name, mode_settings[m].tx_audio_name, sizeof(transmitter->audio_name))) {
+      //
+      // TX local audio settings in mode_settings differ from local settings:
+      //
+      if (transmitter->local_audio) {
+        transmitter->local_audio = 0;
+        audio_close_input(transmitter);
+      }
+
+      if (mode_settings[m].tx_local_audio) {
+        snprintf(transmitter->audio_name, sizeof(transmitter->audio_name), "%s", mode_settings[m].tx_audio_name);
+
+        if (audio_open_input(transmitter) < 0) {
+          transmitter->local_audio = 0;
+          t_print("%s: Open audio input failed\n", __func__);
+        } else {
+          transmitter->local_audio = 1;
+        }
+      }
+    }
   }
 
   g_idle_add(ext_vfo_update, NULL);
+  suppress_popup_sliders--;
 }
 
 void vfo_id_band_changed(int id, int b) {
   if (radio_is_remote) {
-    send_band(client_socket, id, b);
+    send_band(cl_sock_tcp, id, b);
     return;
   }
 
@@ -750,7 +831,7 @@ void vfo_id_band_changed(int id, int b) {
   }
 
   if (oldband != vfo[id].band) {
-    radio_apply_band_settings(SET(id == 0));
+    radio_apply_band_settings(1, id);
   }
 
   //
@@ -778,7 +859,7 @@ void vfo_id_bandstack_changed(int id, int b) {
   }
 
   if (radio_is_remote) {
-    send_bandstack(client_socket, oldstack, b);
+    send_bandstack(cl_sock_tcp, oldstack, b);
     return;
   }
 
@@ -812,18 +893,12 @@ void vfo_id_bandstack_changed(int id, int b) {
 
 void vfo_mode_changed(int m) {
   int id = active_receiver->id;
-
-  if (radio_is_remote) {
-    send_mode(client_socket, id, m);
-    return;
-  }
-
   vfo_id_mode_changed(id, m);
 }
 
 void vfo_id_mode_changed(int id, int m) {
   if (radio_is_remote) {
-    send_mode(client_socket, id, m);
+    send_mode(cl_sock_tcp, id, m);
     return;
   }
 
@@ -872,7 +947,7 @@ void vfo_id_cwpeak_changed(int id, int p) {
   vfo[id].cwAudioPeakFilter = p;
 
   if (radio_is_remote) {
-    send_cwpeak(client_socket, id, p);
+    send_cwpeak(cl_sock_tcp, id, p);
   } else {
     if (id == 0) {
       int mode = vfo[id].mode;
@@ -896,7 +971,7 @@ void vfo_id_filter_changed(int id, int f) {
   vfo[id].filter = f;
 
   if (radio_is_remote) {
-    send_filter_sel(client_socket, id, f);
+    send_filter_sel(cl_sock_tcp, id, f);
     return;
   }
 
@@ -925,20 +1000,21 @@ void vfo_id_filter_changed(int id, int f) {
   g_idle_add(ext_vfo_update, NULL);
 }
 
-void vfo_vfos_changed() {
+void vfo_vfos_changed(void) {
   ASSERT_SERVER();
   //
   // Use this when there are large changes in the VFOs.
   // Apply the new data
   //
   rx_vfo_changed(receiver[0]);
+  radio_tx_vfo_changed();
+  radio_apply_band_settings(1, 0);
 
   if (receivers == 2) {
     rx_vfo_changed(receiver[1]);
+    radio_apply_band_settings(1, 1);
   }
 
-  radio_tx_vfo_changed();
-  radio_apply_band_settings(0);
   //
   // radio_set_alex_antennas already scheduled a HighPrio and General packet,
   // but if the mode changed to/from CW, we also need a DUCspecific packet
@@ -947,25 +1023,25 @@ void vfo_vfos_changed() {
   g_idle_add(ext_vfo_update, NULL);
 }
 
-void vfo_a_to_b() {
+void vfo_a_to_b(void) {
   if (radio_is_remote) {
-    send_vfo_atob(client_socket);
+    send_vfo_atob(cl_sock_tcp);
     return;
   }
 
   int oldmode = vfo[VFO_B].mode;
   vfo[VFO_B] = vfo[VFO_A];
 
-  if (vfo[VFO_B].mode != oldmode && receivers > 1) {
+  if (vfo[VFO_B].mode != oldmode && receivers == 2) {
     vfo_apply_mode_settings(receiver[1]);
   }
 
   vfo_vfos_changed();
 }
 
-void vfo_b_to_a() {
+void vfo_b_to_a(void) {
   if (radio_is_remote) {
-    send_vfo_btoa(client_socket);
+    send_vfo_btoa(cl_sock_tcp);
     return;
   }
 
@@ -979,9 +1055,9 @@ void vfo_b_to_a() {
   vfo_vfos_changed();
 }
 
-void vfo_a_swap_b() {
+void vfo_a_swap_b(void) {
   if (radio_is_remote) {
-    send_vfo_swap(client_socket);
+    send_vfo_swap(cl_sock_tcp);
     return;
   }
 
@@ -993,7 +1069,7 @@ void vfo_a_swap_b() {
   if (vfo[VFO_A].mode != vfo[VFO_B].mode) {
     vfo_apply_mode_settings(receiver[0]);
 
-    if (receivers > 1) {
+    if (receivers == 2) {
       vfo_apply_mode_settings(receiver[1]);
     }
   }
@@ -1051,7 +1127,7 @@ void vfo_id_set_step_from_index(int id, int index) {
   vfo[id].step = step;
 
   if (radio_is_remote) {
-    send_vfo_stepsize(client_socket, id, step);
+    send_vfo_stepsize(cl_sock_tcp, id, step);
   } else {
     if (id == 0) {
       int mode = vfo[id].mode;
@@ -1157,7 +1233,9 @@ void vfo_id_step(int id, int steps) {
       break;
     }
 
-    rx_frequency_changed(receiver[id]);
+    if (id < receivers) {
+      rx_frequency_changed(receiver[id]);
+    }
     g_idle_add(ext_vfo_update, NULL);
   }
 }
@@ -1166,7 +1244,7 @@ void vfo_set_rit_step(int step) {
   int id = active_receiver->id;
 
   if (radio_is_remote) {
-    send_rit_step(client_socket, id, step);
+    send_rit_step(cl_sock_tcp, id, step);
     return;
   }
 
@@ -1175,7 +1253,7 @@ void vfo_set_rit_step(int step) {
 
 void vfo_id_set_rit_step(int id, int step) {
   if (radio_is_remote) {
-    send_rit_step(client_socket, id, step);
+    send_rit_step(cl_sock_tcp, id, step);
     return;
   }
 
@@ -1300,14 +1378,17 @@ void vfo_id_move(int id, long long hz, int round) {
       break;
     }
 
-    rx_frequency_changed(receiver[id]);
+    if (id < receivers) {
+      rx_frequency_changed(receiver[id]);
+    }
+
     g_idle_add(ext_vfo_update, NULL);
   }
 }
 
 void vfo_id_move_to(int id, long long f, int round) {
   if (radio_is_remote) {
-    send_vfo_move_to(client_socket, id, f, round);
+    send_vfo_move_to(cl_sock_tcp, id, f, round);
     return;
   }
 
@@ -1371,7 +1452,10 @@ void vfo_id_move_to(int id, long long f, int round) {
       break;
     }
 
-    rx_vfo_changed(receiver[id]);
+    if (id < receivers) {
+      rx_vfo_changed(receiver[id]);
+    }
+
     g_idle_add(ext_vfo_update, NULL);
   }
 }
@@ -1416,7 +1500,7 @@ static gboolean vfo_draw_cb (GtkWidget *widget,
 // is determined by the current vfo layout
 // Elements whose x-coordinate is zero are not drawn
 //
-void vfo_update() {
+void vfo_update(void) {
   char wid[6];
 
   if (!vfo_surface) { return; }
@@ -1692,7 +1776,7 @@ void vfo_update() {
     cairo_show_text(cr, "B:");
     cairo_set_font_size(cr, vfl->size3);
 
-    if (txvfo == 0 && oob) {
+    if (txvfo == 1 && oob) {
       cairo_show_text(cr, "Out of band");
     } else if (vfo[1].entered_frequency[0]) {
       snprintf(temp_text, sizeof(temp_text), "%s", vfo[1].entered_frequency);
@@ -1843,7 +1927,6 @@ void vfo_update() {
       cairo_set_source_rgba(cr, COLOUR_ATTN);
       cairo_show_text(cr, "NR2");
       break;
-#ifdef EXTNR
 
     case 3:
       cairo_set_source_rgba(cr, COLOUR_ATTN);
@@ -1854,7 +1937,6 @@ void vfo_update() {
       cairo_set_source_rgba(cr, COLOUR_ATTN);
       cairo_show_text(cr, "NR4");
       break;
-#endif
 
     default:
       cairo_set_source_rgba(cr, COLOUR_SHADE);
@@ -1968,14 +2050,14 @@ void vfo_update() {
       cairo_set_source_rgba(cr, COLOUR_ATTN);
     }
 
-    if (!transmitter->cfc && transmitter->compressor) {
+    if (!transmitter->cfc) {
       snprintf(temp_text, sizeof(temp_text), "Cmpr %d", (int) transmitter->compressor_level);
-      cairo_set_source_rgba(cr, COLOUR_ATTN);
-    }
 
-    if (!transmitter->cfc && !transmitter->compressor) {
-      snprintf(temp_text, sizeof(temp_text), "Cmpr");
-      cairo_set_source_rgba(cr, COLOUR_SHADE);
+      if (transmitter->compressor) {
+        cairo_set_source_rgba(cr, COLOUR_ATTN);
+      } else {
+        cairo_set_source_rgba(cr, COLOUR_SHADE);
+      }
     }
 
     cairo_show_text(cr, temp_text);
@@ -2194,12 +2276,12 @@ static gboolean vfo_press_event_cb (GtkWidget *widget, GdkEventButton *event, gp
 
     if (event->x >= abs(vfo_layout_list[display_vfobar[display_size]].vfo_b_x)) { v = VFO_B; }
 
-    g_idle_add(ext_start_vfo, GINT_TO_POINTER(v));
+    g_idle_add(ext_start_vfo_menu, GINT_TO_POINTER(v));
     break;
 
   case GDK_BUTTON_SECONDARY:
     // do not discriminate between A and B
-    g_idle_add(ext_start_band, NULL);
+    g_idle_add(ext_start_band_menu, NULL);
     break;
   }
 
@@ -2231,7 +2313,7 @@ GtkWidget* vfo_init(int width, int height) {
 // transmitter
 //
 
-int vfo_get_tx_vfo() {
+int vfo_get_tx_vfo(void) {
   int txvfo = active_receiver->id;
 
   if (split) { txvfo = 1 - txvfo; }
@@ -2239,7 +2321,7 @@ int vfo_get_tx_vfo() {
   return txvfo;
 }
 
-int vfo_get_tx_mode() {
+int vfo_get_tx_mode(void) {
   int txvfo = active_receiver->id;
 
   if (split) { txvfo = 1 - txvfo; }
@@ -2247,7 +2329,7 @@ int vfo_get_tx_mode() {
   return vfo[txvfo].mode;
 }
 
-long long vfo_get_tx_freq() {
+long long vfo_get_tx_freq(void) {
   int txvfo = active_receiver->id;
 
   if (split) { txvfo = 1 - txvfo; }
@@ -2273,7 +2355,7 @@ void vfo_id_xit_value(int id, long long value ) {
   vfo[id].xit_enabled = value ? 1 : 0;
 
   if (radio_is_remote) {
-    send_xit(client_socket, id);
+    send_xit(cl_sock_tcp, id);
   } else {
     schedule_high_priority();
   }
@@ -2281,7 +2363,7 @@ void vfo_id_xit_value(int id, long long value ) {
   g_idle_add(ext_vfo_update, NULL);
 }
 
-void vfo_xit_toggle() {
+void vfo_xit_toggle(void) {
   int id = vfo_get_tx_vfo();
   vfo_id_xit_toggle(id);
 }
@@ -2305,7 +2387,7 @@ void vfo_id_rit_value(int id, long long value) {
   vfo[id].rit_enabled = value ? 1 : 0;
 
   if (radio_is_remote) {
-    send_rit(client_socket, id);
+    send_rit(cl_sock_tcp, id);
     return;
   } else if (id < receivers) {
     rx_frequency_changed(receiver[id]);
@@ -2318,7 +2400,7 @@ void vfo_id_rit_onoff(int id, int enable) {
   vfo[id].rit_enabled = SET(enable);
 
   if (radio_is_remote) {
-    send_rit(client_socket, id);
+    send_rit(cl_sock_tcp, id);
   } else if (id < receivers) {
     rx_frequency_changed(receiver[id]);
   }
@@ -2335,7 +2417,7 @@ void vfo_id_xit_onoff(int id, int enable) {
   vfo[id].xit_enabled = SET(enable);
 
   if (radio_is_remote) {
-    send_xit(client_socket, id);
+    send_xit(cl_sock_tcp, id);
   } else {
     schedule_high_priority();
   }
@@ -2369,7 +2451,7 @@ void vfo_id_rit_incr(int id, int incr) {
 //
 void vfo_id_set_frequency(int v, long long f) {
   if (radio_is_remote) {
-    send_vfo_frequency(client_socket, v, f);
+    send_vfo_frequency(cl_sock_tcp, v, f);
     return;
   }
 
@@ -2418,7 +2500,7 @@ void vfo_id_set_frequency(int v, long long f) {
 //
 void vfo_id_ctun_update(int id, int state) {
   if (radio_is_remote) {
-    send_ctun(client_socket, id, state);
+    send_ctun(cl_sock_tcp, id, state);
     return;
   }
 

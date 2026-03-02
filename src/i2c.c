@@ -17,9 +17,9 @@
 *
 */
 
-#ifdef GPIO
 #include <gtk/gtk.h>
 
+#ifdef GPIO
 #include <string.h>
 #include <unistd.h>
 #include <errno.h>
@@ -33,7 +33,6 @@
 
 #include "actions.h"
 #include "band.h"
-#include "band_menu.h"
 #include "bandstack.h"
 #include "ext.h"
 #include "gpio.h"
@@ -44,16 +43,19 @@
 #include "vfo.h"
 
 char *i2c_device = "/dev/i2c-1";
-unsigned int i2c_address_1 = 0X20;
-unsigned int i2c_address_2 = 0X23;
+unsigned int i2c_address = 0X20;
 
 static int i2cfd;
 //
 // When reading the flags and ints registers of the
 // MCP23017, it is important that no other thread
-// (e.g., another instance of the interrupt service
-// routine), does this concurrently.
-// i2c_mutex guarantees this.
+// does this concurrently.
+// For example, we now (asynchronously) call the
+// i2c interrupt service routine every 100 msec
+// to recover from "missed" interrupts.
+// With the libgpiod V1 API, it may also happen that
+// concurrent invocations of i2c_interrupt() may
+// occur.
 //
 static GMutex i2c_mutex;
 
@@ -83,10 +85,50 @@ static int write_byte_data(unsigned char reg, unsigned char data) {
   int rc;
 
   if ((rc = i2c_smbus_write_byte_data(i2cfd, reg, data & 0xFF)) < 0) {
-    t_print("%s: write REG_GCONF config failed: addr=%02X %s\n", __FUNCTION__, i2c_address_1, g_strerror(errno));
+    t_print("%s: write REG_GCONF config failed: addr=%02X %s\n", __func__, i2c_address, g_strerror(errno));
   }
 
   return rc;
+}
+
+int i2c_check_presence() {
+  //
+  // Only used on G2 machines to check whether an i2c is present.
+  // This is used to discriminate G2V1 from later versions.
+  // Note that this is done before i2c_init() is called, even
+  // before the GPIO lines are set up (thus no mutex here).
+  //
+  int fd = open(i2c_device, O_RDWR);
+
+  if (fd < 0 ) {
+    //
+    // No I2C device found
+    //
+    t_print("%s: could not open %s\n", __func__, i2c_device);
+    return 0;
+  }
+
+  if (ioctl(fd, I2C_SLAVE, i2c_address) < 0) {
+    //
+    // No device with correct address found
+    //
+    t_print("%s: ioctl failed\n", __func__);
+    close(fd);
+    return 0;
+  }
+
+  //
+  // Try a read from address 0, if it succeeds, we have a G2V1
+  //
+  __s32 data = i2c_smbus_read_byte_data(fd, 0);
+  close(fd);
+  if (data < 0) {
+    t_print("%s: i2c read failed.\n", __func__);
+    return 0;
+  } else {
+    t_print("%s: G2V1/Controller2 I2C device detected.\n", __func__);
+    return 1;
+  }
 }
 
 #if 0
@@ -113,26 +155,32 @@ void i2c_interrupt() {
   for (;;) {
     flags = read_word_data(0x0E);
 
+    //
     // bits in "flags" indicate which input lines triggered an interrupt
     // Two interrupts occuring at about the same time can lead to multiple bits
     // set in "flags" (or no bit set if interrupt has already been processed
     // by another interrupt service routine). If we enter here (protected by
-    // the mutex), we handle all interrupts until no one is left (flags==0)
+    // the mutex), we handle all interrupts until no one is left (flags==0).
+    // This also means that this routine can safely be called if there was
+    // no interrupt -- in this case we quickly return.
+    //
     if (flags == 0) { break; }
 
     unsigned int ints = read_word_data(0x10);
 
-    //t_print("%s: flags=%04X ints=%04X\n",__FUNCTION__,flags,ints);
     // only those bits in "ints" matter where the corresponding position
     // in "flags" is set. We have a PRESSED or RELEASED event depending on
     // whether the bit in "ints" is set or clear.
-    for (i = 0; i < 16 && flags; i++) { // leave loop if no bits left in "flags"
+
+    for (i = 0; i < 16; i++) {
+      if (flags == 0) { break; }  // leave loop if no bits left in "flags"
+
       if (i2c_sw[i] & flags) {
-        //t_print("%s: switches=%p sw=%d action=%d\n",__FUNCTION__,switches,i,switches[i].switch_function);
+        //t_print("%s: switches=%p sw=%d action=%d\n",__func__,switches,i,switches[i].switch_function);
         // The input line associated with switch #i has triggered an interrupt
-        // clear *this* bit in flags
+        // clear *this* bit in flags to make it zero when all events have been processed
         flags &= ~i2c_sw[i];
-        schedule_action(switches[i].switch_function, (ints & i2c_sw[i]) ? PRESSED : RELEASED, 0);
+        schedule_action(switches[i].function, (ints & i2c_sw[i]) ? PRESSED : RELEASED, 0);
       }
     }
   }
@@ -142,18 +190,17 @@ void i2c_interrupt() {
 
 void i2c_init() {
   int flags;
-  t_print("%s: open i2c device %s\n", __FUNCTION__, i2c_device);
   i2cfd = open(i2c_device, O_RDWR);
 
   if (i2cfd < 0) {
-    t_print("%s: open i2c device %s failed: %s\n", __FUNCTION__, i2c_device, g_strerror(errno));
+    t_print("%s: open i2c device %s failed: %s\n", __func__, i2c_device, g_strerror(errno));
     return;
   }
 
-  t_print("%s: open i2c device %s fd=%d\n", __FUNCTION__, i2c_device, i2cfd);
+  t_print("%s: i2c device %s fd=%d\n", __func__, i2c_device, i2cfd);
 
-  if (ioctl(i2cfd, I2C_SLAVE, i2c_address_1) < 0) {
-    t_print("%s: ioctl i2c slave %ud failed: %s\n", __FUNCTION__, i2c_address_1, g_strerror(errno));
+  if (ioctl(i2cfd, I2C_SLAVE, i2c_address) < 0) {
+    t_print("%s: ioctl i2c slave %ud failed: %s\n", __func__, i2c_address, g_strerror(errno));
     return;
   }
 

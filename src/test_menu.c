@@ -41,7 +41,7 @@ static int test_action = NO_ACTION;
 static guint repeat_timer = 0;
 static int repeat_state = 0;
 
-static gboolean delete_cb() {
+static gboolean delete_cb(void) {
   //
   // The test menu can be destroyd by standard GTK methods
   // (e.g. closing the menu window).
@@ -84,7 +84,7 @@ static void test_action_changed_cb(GtkWidget *widget, gpointer data) {
   gtk_widget_set_sensitive(test_ccw, FALSE);
   gtk_widget_set_sensitive(test_cw, FALSE);
 
-  if (ActionTable[test_action].type & (MIDI_KEY | CONTROLLER_SWITCH)) {
+  if (ActionTable[test_action].type & AT_BTN) {
     gtk_widget_set_sensitive(test_press, TRUE);
   } else {
     gtk_widget_set_sensitive(test_ccw, TRUE);

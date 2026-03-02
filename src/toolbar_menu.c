@@ -30,7 +30,7 @@
 
 static GtkWidget *dialog = NULL;
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -41,16 +41,16 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
 
 static gboolean switch_cb(GtkWidget *widget, GdkEvent *event, gpointer data) {
-  SWITCH *sw = (SWITCH *) data;
-  int action = action_dialog(dialog, CONTROLLER_SWITCH, sw->switch_function);
-  gtk_button_set_label(GTK_BUTTON(widget), ActionTable[action].button_str);
-  sw->switch_function = action;
+  enum ACTION *action = (enum ACTION *) data;
+  int new = action_dialog(dialog, AT_BTN, *action);
+  gtk_button_set_label(GTK_BUTTON(widget), ActionTable[new].button_str);
+  *action = new;
   update_toolbar_labels();
   return TRUE;
 }
@@ -75,24 +75,19 @@ void toolbar_menu(GtkWidget *parent) {
   gtk_widget_set_name(close_b, "close_button");
   g_signal_connect (close_b, "button-press-event", G_CALLBACK(close_cb), NULL);
   gtk_grid_attach(GTK_GRID(grid), close_b, 0, 0, 3, 1);
-  int lfunction = 0;
-  const int max_switches = 8;
 
-  for (lfunction = 0; lfunction < MAX_FUNCTIONS; lfunction++) {
-    SWITCH *sw = switches_controller1[lfunction];
-
-    for (int i = 0; i < max_switches; i++) {
-      if (i == max_switches - 1) {
+  for (int tbfunc = 0; tbfunc < MAX_TB_FUNCTIONS; tbfunc++) {
+    for (int i = 0; i < MAX_TB_BUTTONS; i++) {
+      if (i == MAX_TB_BUTTONS - 1) {
         // Rightmost switch is hardwired to FUNCTION
-        sw[i].switch_function = FUNCTION;
         gchar text[16];
-        snprintf(text, sizeof(text), "FNC(%d)", lfunction);
+        snprintf(text, sizeof(text), "FNC(%d)", tbfunc);
         widget = gtk_button_new_with_label(text);
-        gtk_grid_attach(GTK_GRID(grid), widget, i, lfunction + 1, 1, 1);
+        gtk_grid_attach(GTK_GRID(grid), widget, i, MAX_TB_FUNCTIONS - tbfunc, 1, 1);
       } else {
-        widget = gtk_button_new_with_label(ActionTable[sw[i].switch_function].button_str);
-        gtk_grid_attach(GTK_GRID(grid), widget, i, lfunction + 1, 1, 1);
-        g_signal_connect(widget, "button-press-event", G_CALLBACK(switch_cb), (gpointer) &sw[i]);
+        widget = gtk_button_new_with_label(ActionTable[tb_actions[tbfunc][i]].button_str);
+        gtk_grid_attach(GTK_GRID(grid), widget, i, MAX_TB_FUNCTIONS - tbfunc, 1, 1);
+        g_signal_connect(widget, "button-press-event", G_CALLBACK(switch_cb), (gpointer) &tb_actions[tbfunc][i]);
       }
     }
   }

@@ -34,9 +34,9 @@
 
 static GtkWidget *dialog = NULL;
 
-GtkWidget *store_button[NUM_OF_MEMORYS];
+static GtkWidget *store_button[NUM_MEMORIES];
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -47,16 +47,16 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
 
 static gboolean store_select_cb (GtkWidget *widget, GdkEventButton *event, gpointer data) {
   int ind = GPOINTER_TO_INT(data);
-  char label_str[40];
+  char label_str[50];
   char fw[16];
-  char sm[16];
+  char sm[8];
   store_memory_slot(ind);
   int mode = mem[ind].mode;
 
@@ -116,10 +116,10 @@ void store_menu(GtkWidget *parent) {
   g_signal_connect (close_b, "button-press-event", G_CALLBACK(close_cb), NULL);
   gtk_grid_attach(GTK_GRID(grid), close_b, 0, 0, 1, 1);
 
-  for (int ind = 0; ind < NUM_OF_MEMORYS; ind++) {
+  for (int ind = 0; ind < NUM_MEMORIES; ind++) {
     char label_str[50];
     char fw[16];
-    char sm[16];
+    char sm[8];
     snprintf(label_str, sizeof(label_str), "Store M%d", ind);
     int mode = mem[ind].mode;
     b = gtk_button_new_with_label(label_str);

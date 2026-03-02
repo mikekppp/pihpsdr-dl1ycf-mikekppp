@@ -36,17 +36,17 @@ static int vox_timeout_cb(gpointer data) {
   // then, remove VOX and update display
   //
   vox_cancel();
-  g_idle_add(ext_set_vox, GINT_TO_POINTER(0));
+  g_idle_add(ext_radio_set_vox, GINT_TO_POINTER(0));
   g_idle_add(ext_vfo_update, NULL);
   return FALSE;
 }
 
-double vox_get_peak() {
+double vox_get_peak(void) {
   double result = peak;
   return result;
 }
 
-void vox_clear() {
+void vox_clear(void) {
   peak = 0.0;
 }
 
@@ -74,7 +74,7 @@ void vox_update(double lvl) {
         //
         // no hanging time-out, assume that we just fired VOX
         //
-        g_idle_add(ext_set_vox, GINT_TO_POINTER(1));
+        g_idle_add(ext_radio_set_vox, GINT_TO_POINTER(1));
         g_idle_add(ext_vfo_update, NULL);
       }
 
@@ -89,7 +89,7 @@ void vox_update(double lvl) {
 //
 // If no vox time-out is hanging, this function is a no-op
 //
-void vox_cancel() {
+void vox_cancel(void) {
   if (vox_timeout) {
     g_source_remove(vox_timeout);
     vox_timeout = 0;

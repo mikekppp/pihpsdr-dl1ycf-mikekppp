@@ -18,14 +18,9 @@
 */
 
 #include <gtk/gtk.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "band.h"
 #include "bandstack.h"
-#include "band_menu.h"
 #include "client_server.h"
 #include "filter.h"
 #include "new_menu.h"
@@ -49,7 +44,7 @@ static struct _CHOICE *current = NULL;
 
 static int myvfo;
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -68,12 +63,12 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
 
-gboolean band_select_cb (GtkWidget *widget, gpointer data) {
+static gboolean band_select_cb (GtkWidget *widget, gpointer data) {
   CHOICE *choice = (CHOICE *) data;
   int newband;
 
@@ -82,7 +77,7 @@ gboolean band_select_cb (GtkWidget *widget, gpointer data) {
   // band stack
   //
   if (radio_is_remote) {
-    send_band(client_socket, myvfo, choice->info);
+    send_band(cl_sock_tcp, myvfo, choice->info);
     // We have to assume that the band change succeeded, we just cannot know.
     newband = choice->info;
   } else {

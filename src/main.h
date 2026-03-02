@@ -22,17 +22,6 @@
 
 #include <gtk/gtk.h>
 
-enum _controller_enum {
-  NO_CONTROLLER = 0,
-  CONTROLLER1,
-  CONTROLLER2_V1,
-  CONTROLLER2_V2,
-  G2_FRONTPANEL,
-  G2_V2
-};
-
-extern int controller;
-
 extern GdkScreen *screen;
 extern int display_size;       // pointer into display_width and display_height, 0 means FullScreen
 extern int display_width[6];
@@ -45,5 +34,5 @@ extern GtkWidget *topgrid;
 extern void status_text(const char *text);
 
 extern gulong keypress_signal_id;
-extern int fatal_error(void *data);
+extern int fatal_error(gpointer data);
 #endif

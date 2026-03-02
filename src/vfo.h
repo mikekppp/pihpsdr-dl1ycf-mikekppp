@@ -104,16 +104,21 @@ struct _mode_settings {
   int    nr_agc;                    // NR parameters
   int    nr2_gain_method;
   int    nr2_npe_method;
-  int    nr2_ae;
+  int    nr2_post;
+  int    nr2_post_taper;
+  int    nr2_post_nlevel;
+  int    nr2_post_factor;
+  int    nr2_post_rate;
   double nr2_trained_threshold;
   double nr2_trained_t2;
-#ifdef EXTNR
-  double nr4_reduction_amount;      // NR4 parameters, only used if compiled with EXTNR
+  double nr4_reduction_amount;      // NR4 parameters
   double nr4_smoothing_factor;
   double nr4_whitening_factor;
   double nr4_noise_rescale;
   double nr4_post_threshold;
-#endif
+  int    nr4_noise_scaling_type;
+  int squelch_enable;               // Squelch on/off
+  double squelch;                   // squelch value
   int anf;                          // Automatic notch filter
   int snb;                          // Spectral noise blanker
   int agc;                          // AGC characteristics (slow/medium/fast etc.)
@@ -151,6 +156,14 @@ struct _mode_settings {
   int tx_default_filter_low;
   int tx_default_filter_high;
   int use_rx_filter;
+  //
+  // Local audio settings
+  //
+  int rx_audio_channel;             //  RX1 STEREO/LEFT/RIGHT
+  int rx_local_audio;               //  RX1 local audio output
+  int tx_local_audio;               //  TX local audio input
+  char rx_audio_name[128];          //  RX1 local audio device name
+  char tx_audio_name[128];          //  TX local audio device name
 };
 
 extern struct _mode_settings mode_settings[];
@@ -177,6 +190,8 @@ extern void       vfo_id_move_to(int id, long long hz, int round);
 extern void       vfo_update(void);
 extern void       vfo_save_state(void);
 extern void       vfo_restore_state(void);
+extern void       modesettings_save_state(void);
+extern void       modesettings_restore_state(void);
 extern void       vfo_id_band_changed(int id, int b);
 extern void       vfo_id_bandstack_changed(int id, int b);
 extern void       vfo_bandstack_changed(int b);

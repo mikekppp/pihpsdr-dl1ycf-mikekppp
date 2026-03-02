@@ -18,13 +18,7 @@
 */
 
 #include <gtk/gtk.h>
-#include <semaphore.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
-#include "equalizer_menu.h"
 #include "ext.h"
 #include "main.h"
 #include "message.h"
@@ -41,7 +35,7 @@ static GtkWidget *tx_container;
 
 static int eqid = 0;      // 0: RX1, 1: RX2, 2: TX
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -52,7 +46,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -140,14 +134,17 @@ static void eqid_changed_cb(GtkWidget *widget, gpointer data) {
     switch (eqid) {
     case 0:
       gtk_widget_show(rx1_container);
+      gtk_window_resize(GTK_WINDOW(dialog), 1, 1);
       break;
 
     case 1:
       gtk_widget_show(rx2_container);
+      gtk_window_resize(GTK_WINDOW(dialog), 1, 1);
       break;
 
     case 2:
       gtk_widget_show(tx_container);
+      gtk_window_resize(GTK_WINDOW(dialog), 1, 1);
       break;
     }
   }
@@ -265,7 +262,7 @@ void equalizer_menu(GtkWidget *parent) {
     gtk_toggle_button_set_active (GTK_TOGGLE_BUTTON (mbtn), en);
     g_signal_connect(mbtn, "toggled", G_CALLBACK(enable_cb), GINT_TO_POINTER(myeq));
     mycol++;
-    label = gtk_label_new("Added Frequency-Independent Gain:");
+    label = gtk_label_new("Added Frequency-Independent Gain");
     gtk_widget_set_name(label, "boldlabel");
     gtk_grid_attach(GTK_GRID(mygrid), label, mycol, myrow, 2, 1);
     mycol += 2;
@@ -338,4 +335,5 @@ void equalizer_menu(GtkWidget *parent) {
     gtk_widget_hide(rx2_container);
     break;
   }
+  gtk_window_resize(GTK_WINDOW(dialog), 1, 1);
 }

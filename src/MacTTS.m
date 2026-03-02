@@ -16,7 +16,7 @@
 //
 static AVSpeechSynthesizer *synth = NULL;
 
-void MacTTS(char *text) {
+void MacTTS(const char *text) {
   //
   // Convert C string to a NSString and init an AVSpeechUtterance instance
   // with English language
@@ -28,7 +28,7 @@ void MacTTS(char *text) {
   // then keep it.
   //
   if (synth == NULL) {
-   t_print("%s: Creating the MacOS Speech Synthesizer Instance\n", __FUNCTION__);
+   t_print("%s: Creating the MacOS Speech Synthesizer Instance\n", __func__);
    synth = [[AVSpeechSynthesizer alloc] init];
   }
 

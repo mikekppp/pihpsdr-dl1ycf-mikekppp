@@ -45,9 +45,9 @@
  * On the client side, such data is simply stored but no action takes place.
  *
  * Most packets are sent from the GTK queue, but audio data is sent directly from
- * the receive thread, so we need a mutex in send_bytes. It is important that
+ * the receive thread, so we need a mutex in send_tcp(). It is important that
  * a packet (that is, a bunch of data that belongs together) is sent in a single
- * call to send_bytes.
+ * call to send_tcp().
  */
 
 /*
@@ -68,7 +68,7 @@
 #include "vfo.h"
 
 //
-// From a challenge in s, calculate a password hash with  loop and salt
+// From a challenge in s, calculate a password hash with "loop and salt".
 // The number of bytes in the challenge equals the length of a SHA512
 // hash. Note the length of the hash is the "digest length", and the
 // maximum length of the string to be hashed is 2*digest_length + 4
@@ -113,7 +113,7 @@ void generate_pwd_hash(unsigned char *s, unsigned char *hash, const char *pwd) {
   }
 }
 
-int recv_bytes(int s, char *buffer, int bytes) {
+int recv_tcp(int s, char *buffer, int bytes) {
   int bytes_read = 0;
   int count = 0;
 
@@ -128,9 +128,9 @@ int recv_bytes(int s, char *buffer, int bytes) {
     if (rc < 0 || ++count >= 10) {
       // return -1, so we need not check downstream
       // on incomplete messages received
-      t_print("%s: read %d bytes, but expected %d.\n", __FUNCTION__, bytes_read, bytes);
+      t_print("%s: read %d bytes, but expected %d.\n", __func__, bytes_read, bytes);
       bytes_read = -1;
-      t_perror("recv_bytes");
+      t_perror("recv_tcp");
 
       if (!radio_is_remote) {
         //
@@ -154,7 +154,7 @@ int recv_bytes(int s, char *buffer, int bytes) {
 // To make this bullet proof, we need a mutex here in case a
 // remote_rxaudio occurs while sending another packet.
 //
-int send_bytes(int s, char *buffer, int bytes) {
+int send_tcp(int s, char *buffer, int bytes) {
   static GMutex send_mutex;  // static so correctly initialised
   int bytes_sent = 0;
 
@@ -168,9 +168,9 @@ int send_bytes(int s, char *buffer, int bytes) {
     if (rc < 0) {
       // return -1, so we need not check downstream
       // on incomplete messages sent
-      t_print("%s: sent %d bytes, but tried %d.\n", __FUNCTION__, bytes_sent, bytes);
+      t_print("%s: sent %d bytes, but tried %d.\n", __func__, bytes_sent, bytes);
       bytes_sent = -1;
-      t_perror("send_bytes");
+      t_perror("send_tcp");
 
       if (!radio_is_remote) {
         //
@@ -192,14 +192,14 @@ int send_bytes(int s, char *buffer, int bytes) {
 void send_start_radio(int sock) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_START_RADIO);
-  send_bytes(sock, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_START_RADIO);
+  send_tcp(sock, (char *)&header, sizeof(HEADER));
 }
 
 void send_rxmenu(int sock, int id) {
   RXMENU_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(CMD_RXMENU);
+  data.header.data_type = to_16(CMD_RXMENU);
   data.id = id;
   data.dither = adc[id].dither;
   data.random = adc[id].random;
@@ -207,26 +207,20 @@ void send_rxmenu(int sock, int id) {
   data.alex_attenuation = adc[id].alex_attenuation;
   data.adc0_filter_bypass = adc[0].filter_bypass;
   data.adc1_filter_bypass = adc[1].filter_bypass;
-  send_bytes(sock, (char *)&data, sizeof(RXMENU_DATA));
+  send_tcp(sock, (char *)&data, sizeof(RXMENU_DATA));
 }
 
 void send_radiomenu(int sock) {
   RADIOMENU_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(CMD_RADIOMENU);
-  data.mic_ptt_tip_bias_ring = mic_ptt_tip_bias_ring;
+  data.header.data_type = to_16(CMD_RADIOMENU);
   data.sat_mode = sat_mode;
-  data.mic_input_xlr = mic_input_xlr;
   data.atlas_clock_source_10mhz = atlas_clock_source_10mhz;
   data.atlas_clock_source_128mhz = atlas_clock_source_128mhz;
   data.atlas_mic_source = atlas_mic_source;
   data.atlas_penelope = atlas_penelope;
   data.atlas_janus = atlas_janus;
-  data.mic_ptt_enabled = mic_ptt_enabled;
-  data.mic_bias_enabled = mic_bias_enabled;
   data.pa_enabled = pa_enabled;
-  data.mute_spkr_amp = mute_spkr_amp;
-  data.mute_spkr_xmit = mute_spkr_xmit;
   data.hl2_audio_codec = hl2_audio_codec;
   data.soapy_iqswap = soapy_iqswap;
   data.enable_tx_inhibit = enable_tx_inhibit;
@@ -235,18 +229,18 @@ void send_radiomenu(int sock) {
   data.tx_out_of_band_allowed = tx_out_of_band_allowed;
   data.OCtune = OCtune;
   //
-  data.rx_gain_calibration = to_short(rx_gain_calibration);
-  data.OCfull_tune_time = to_short(OCfull_tune_time);
-  data.OCmemory_tune_time = to_short(OCmemory_tune_time);
+  data.rx_gain_calibration = to_16(rx_gain_calibration);
+  data.OCfull_tune_time = to_16(OCfull_tune_time);
+  data.OCmemory_tune_time = to_16(OCmemory_tune_time);
   //
-  data.frequency_calibration = to_ll(frequency_calibration);
-  send_bytes(sock, (char *)&data, sizeof(RADIOMENU_DATA));
+  data.frequency_calibration = to_16(frequency_calibration);
+  send_tcp(sock, (char *)&data, sizeof(RADIOMENU_DATA));
 }
 
 void send_memory_data(int sock, int index) {
   MEMORY_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(INFO_MEMORY);
+  data.header.data_type = to_16(INFO_MEMORY);
   data.index              = index;
   data.sat_mode           = mem[index].sat_mode;
   data.ctun               = mem[index].ctun;
@@ -260,20 +254,20 @@ void send_memory_data(int sock, int index) {
   data.ctcss_enabled      = mem[index].ctcss_enabled;
   data.ctcss              = mem[index].ctcss;
   //
-  data.deviation          = to_short(mem[index].deviation);
-  data.alt_deviation      = to_short(mem[index].alt_deviation);
+  data.deviation          = to_16(mem[index].deviation);
+  data.alt_deviation      = to_16(mem[index].alt_deviation);
   //
-  data.frequency          = to_ll(mem[index].frequency);
-  data.ctun_frequency     = to_ll(mem[index].ctun_frequency);
-  data.alt_frequency      = to_ll(mem[index].frequency);
-  data.alt_ctun_frequency = to_ll(mem[index].ctun_frequency);
-  send_bytes(sock, (char *)&data, sizeof(MEMORY_DATA));
+  data.frequency          = to_64(mem[index].frequency);
+  data.ctun_frequency     = to_64(mem[index].ctun_frequency);
+  data.alt_frequency      = to_64(mem[index].frequency);
+  data.alt_ctun_frequency = to_64(mem[index].ctun_frequency);
+  send_tcp(sock, (char *)&data, sizeof(MEMORY_DATA));
 }
 
 void send_band_data(int sock, int b) {
   BAND_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(INFO_BAND);
+  data.header.data_type = to_16(INFO_BAND);
   BAND *band = band_get_band(b);
   snprintf(data.title, sizeof(data.title), "%s", band->title);
   data.band = b;
@@ -283,26 +277,26 @@ void send_band_data(int sock, int b) {
   data.TxAntenna = band->TxAntenna;
   data.disablePA = band->disablePA;
   data.current = band->bandstack->current_entry;
-  data.gaincalib = to_short(band->gaincalib);
+  data.gaincalib = to_16(band->gaincalib);
   data.pa_calibration = to_double(band->pa_calibration);
-  data.frequencyMin = to_ll(band->frequencyMin);
-  data.frequencyMax = to_ll(band->frequencyMax);
-  data.frequencyLO = to_ll(band->frequencyLO);
-  data.errorLO = to_ll(band->errorLO);
-  send_bytes(sock, (char *)&data, sizeof(BAND_DATA));
+  data.frequencyMin = to_64(band->frequencyMin);
+  data.frequencyMax = to_64(band->frequencyMax);
+  data.frequencyLO = to_64(band->frequencyLO);
+  data.errorLO = to_64(band->errorLO);
+  send_tcp(sock, (char *)&data, sizeof(BAND_DATA));
 }
 
 void send_xvtr_changed(int sock) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_XVTR);
-  send_bytes(sock, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_XVTR);
+  send_tcp(sock, (char *)&header, sizeof(HEADER));
 }
 
 void send_bandstack_data(int sock, int b, int stack) {
   BANDSTACK_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(INFO_BANDSTACK);
+  data.header.data_type = to_16(INFO_BANDSTACK);
   BAND *band = band_get_band(b);
   BANDSTACK_ENTRY *entry = band->bandstack->entry;
   entry += stack;
@@ -313,16 +307,16 @@ void send_bandstack_data(int sock, int b, int stack) {
   data.ctun = entry->ctun;
   data.ctcss_enabled = entry->ctcss_enabled;
   data.ctcss = entry->ctcss;
-  data.deviation = to_short(entry->deviation);
-  data.frequency = to_ll(entry->frequency);
-  data.ctun_frequency = to_ll(entry->ctun_frequency);
-  send_bytes(sock, (char *)&data, sizeof(BANDSTACK_DATA));
+  data.deviation = to_16(entry->deviation);
+  data.frequency = to_64(entry->frequency);
+  data.ctun_frequency = to_64(entry->ctun_frequency);
+  send_tcp(sock, (char *)&data, sizeof(BANDSTACK_DATA));
 }
 
 void send_radio_data(int sock) {
   RADIO_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(INFO_RADIO);
+  data.header.data_type = to_16(INFO_RADIO);
   snprintf(data.name, sizeof(data.name), "%s", radio->name);
   data.locked = locked;
   data.protocol = protocol;
@@ -341,17 +335,8 @@ void send_radio_data(int sock) {
   data.anan10E = anan10E;
   data.tx_out_of_band_allowed = tx_out_of_band_allowed;
   data.pa_enabled = pa_enabled;
-  data.mic_boost = mic_boost;
-  data.mic_linein = mic_linein;
-  data.mic_ptt_enabled = mic_ptt_enabled;
-  data.mic_bias_enabled = mic_bias_enabled;
-  data.mic_ptt_tip_bias_ring = mic_ptt_tip_bias_ring;
-  data.mic_input_xlr = mic_input_xlr;
-  data.cw_keyer_sidetone_volume = cw_keyer_sidetone_volume;
   data.OCtune = OCtune;
   data.mute_rx_while_transmitting = mute_rx_while_transmitting;
-  data.mute_spkr_amp = mute_spkr_amp;
-  data.mute_spkr_xmit = mute_spkr_xmit;
   data.split = split;
   data.sat_mode = sat_mode;
   data.duplex = duplex;
@@ -403,12 +388,12 @@ void send_radio_data(int sock) {
   }
 
   //
-  data.pa_power = to_short(pa_power);
-  data.OCfull_tune_time = to_short(OCfull_tune_time);
-  data.OCmemory_tune_time = to_short(OCmemory_tune_time);
-  data.cw_keyer_sidetone_frequency = to_short(cw_keyer_sidetone_frequency);
-  data.rx_gain_calibration = to_short(rx_gain_calibration);
-  data.device = to_short(device);
+  data.pa_power = to_16(pa_power);
+  data.OCfull_tune_time = to_16(OCfull_tune_time);
+  data.OCmemory_tune_time = to_16(OCmemory_tune_time);
+  data.cw_keyer_sidetone_frequency = to_16(cw_keyer_sidetone_frequency);
+  data.rx_gain_calibration = to_16(rx_gain_calibration);
+  data.device = to_16(device);
   //
   data.drive_min = to_double(drive_min);
   data.drive_max = to_double(drive_max);
@@ -449,17 +434,17 @@ void send_radio_data(int sock) {
   }
 
   //
-  data.frequency_calibration = to_ll(frequency_calibration);
-  data.soapy_radio_sample_rate = to_ll(soapy_radio_sample_rate);
-  data.radio_frequency_min = to_ll(radio->frequency_min);
-  data.radio_frequency_max = to_ll(radio->frequency_max);
-  send_bytes(sock, (char *)&data, sizeof(RADIO_DATA));
+  data.frequency_calibration = to_16(frequency_calibration);
+  data.soapy_radio_sample_rate = to_32(soapy_radio_sample_rate);
+  data.radio_frequency_min = to_64(radio->frequency_min);
+  data.radio_frequency_max = to_64(radio->frequency_max);
+  send_tcp(sock, (char *)&data, sizeof(RADIO_DATA));
 }
 
 void send_adc_data(int sock, int i) {
   ADC_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(INFO_ADC);
+  data.header.data_type = to_16(INFO_ADC);
   data.adc = i;
   data.preamp = adc[i].preamp;
   data.dither = adc[i].dither;
@@ -467,11 +452,11 @@ void send_adc_data(int sock, int i) {
   data.antenna = adc[i].antenna;
   data.alex_attenuation = adc[i].alex_attenuation;
   data.filter_bypass = adc[i].filter_bypass;
-  data.attenuation = to_short(adc[i].attenuation);
+  data.attenuation = to_16(adc[i].attenuation);
   data.gain = to_double(adc[i].gain);
   data.min_gain = to_double(adc[i].min_gain);
   data.max_gain = to_double(adc[i].max_gain);
-  send_bytes(sock, (char *)&data, sizeof(ADC_DATA));
+  send_tcp(sock, (char *)&data, sizeof(ADC_DATA));
 }
 
 void send_tx_data(int sock) {
@@ -479,7 +464,7 @@ void send_tx_data(int sock) {
     TRANSMITTER_DATA data;
     const TRANSMITTER *tx = transmitter;
     SYNC(data.header.sync);
-    data.header.data_type = to_short(INFO_TRANSMITTER);
+    data.header.data_type = to_16(INFO_TRANSMITTER);
     //
     data.id = tx->id;
     data.dac = tx->dac;
@@ -506,20 +491,21 @@ void send_tx_data(int sock) {
     data.alcmode = tx->alcmode;
     data.swr_protection = tx->swr_protection;
     //
-    data.fps = to_short(tx->fps);
-    data.dexp_filter_low = to_short(tx->dexp_filter_low);
-    data.dexp_filter_high = to_short(tx->dexp_filter_high);
-    data.dexp_trigger = to_short(tx->dexp_trigger);
-    data.dexp_exp = to_short(tx->dexp_exp);
-    data.filter_low = to_short(tx->filter_low);
-    data.filter_high = to_short(tx->filter_high);
-    data.deviation = to_short(tx->deviation);
-    data.width = to_short(tx->width);
-    data.height = to_short(tx->height);
-    data.attenuation = to_short(tx->attenuation);
-    data.tx_default_filter_low = to_short(tx->default_filter_low);
-    data.tx_default_filter_high = to_short(tx->default_filter_high);
-    data.fft_size = to_ll(tx->fft_size);
+    data.fps = to_16(tx->fps);
+    data.dexp_filter_low = to_16(tx->dexp_filter_low);
+    data.dexp_filter_high = to_16(tx->dexp_filter_high);
+    data.dexp_trigger = to_16(tx->dexp_trigger);
+    data.dexp_exp = to_16(tx->dexp_exp);
+    data.filter_low = to_16(tx->filter_low);
+    data.filter_high = to_16(tx->filter_high);
+    data.deviation = to_16(tx->deviation);
+    data.width = to_16(tx->width);
+    data.height = to_16(tx->height);
+    data.attenuation = to_16(tx->attenuation);
+    data.tx_default_filter_low = to_16(tx->default_filter_low);
+    data.tx_default_filter_high = to_16(tx->default_filter_high);
+    //
+    data.fft_size = to_32(tx->fft_size);
 
     //
     for (int i = 0; i < 11; i++) {
@@ -543,91 +529,86 @@ void send_tx_data(int sock) {
     data.ps_ampdelay =  to_double(tx->ps_ampdelay);
     data.ps_moxdelay =  to_double(tx->ps_moxdelay);
     data.ps_loopdelay =  to_double(tx->ps_loopdelay);
-    send_bytes(sock, (char *)&data, sizeof(TRANSMITTER_DATA));
+    data.ps_setpk =  to_double(tx->ps_setpk);
+    send_tcp(sock, (char *)&data, sizeof(TRANSMITTER_DATA));
   }
 }
 
 void send_rx_data(int sock, int id) {
   RECEIVER_DATA data;
   SYNC(data.header.sync);
-  data.header.data_type = to_short(INFO_RECEIVER);
+  data.header.data_type = to_16(INFO_RECEIVER);
   const RECEIVER *rx = receiver[id];
-  data.id                    = rx->id;
-  data.adc                   = rx->adc;
-  data.agc                   = rx->agc;
-  data.nb                    = rx->nb;
-  data.nb2_mode              = rx->nb2_mode;
-  data.nr                    = rx->nr;
-  data.nr_agc                = rx->nr_agc;
-  data.nr2_ae                = rx->nr2_ae;
-  data.nr2_gain_method       = rx->nr2_gain_method;
-  data.nr2_npe_method        = rx->nr2_npe_method;
-  data.anf                   = rx->anf;
-  data.snb                   = rx->snb;
-  data.display_detector_mode = rx->display_detector_mode;
-  data.display_average_mode  = rx->display_average_mode;
-  data.zoom                  = rx->zoom;
-  data.squelch_enable        = rx->squelch_enable;
-  data.binaural              = rx->binaural;
-  data.eq_enable             = rx->eq_enable;
-  data.smetermode            = rx->smetermode;
-  data.low_latency           = rx->low_latency;
-  data.pan                   = rx->pan;
+  data.id                     = rx->id;
+  data.adc                    = rx->adc;
+  data.agc                    = rx->agc;
+  data.nb                     = rx->nb;
+  data.nb2_mode               = rx->nb2_mode;
+  data.nr                     = rx->nr;
+  data.nr_agc                 = rx->nr_agc;
+  data.nr2_gain_method        = rx->nr2_gain_method;
+  data.nr2_npe_method         = rx->nr2_npe_method;
+  data.nr2_post               = rx->nr2_post;
+  data.nr2_post_taper         = rx->nr2_post_taper;
+  data.nr2_post_nlevel        = rx->nr2_post_nlevel;
+  data.nr2_post_factor        = rx->nr2_post_factor;
+  data.nr2_post_rate          = rx->nr2_post_rate;
+  data.nr4_noise_scaling_type = rx->nr4_noise_scaling_type;
+  data.anf                    = rx->anf;
+  data.snb                    = rx->snb;
+  data.display_detector_mode  = rx->display_detector_mode;
+  data.display_average_mode   = rx->display_average_mode;
+  data.zoom                   = rx->zoom;
+  data.squelch_enable         = rx->squelch_enable;
+  data.binaural               = rx->binaural;
+  data.eq_enable              = rx->eq_enable;
+  data.smetermode             = rx->smetermode;
+  data.low_latency            = rx->low_latency;
+  data.pan                    = rx->pan;
   //
-  data.fps                   = to_short(rx->fps);
-  data.filter_low            = to_short(rx->filter_low);
-  data.filter_high           = to_short(rx->filter_high);
-  data.deviation             = to_short(rx->deviation);
-  data.width                 = to_short(rx->width);
+  data.fps                    = to_16(rx->fps);
+  data.filter_low             = to_16(rx->filter_low);
+  data.filter_high            = to_16(rx->filter_high);
+  data.deviation              = to_16(rx->deviation);
+  data.width                  = to_16(rx->width);
   //
-  data.cA                    = to_double(rx->cA);
-  data.cB                    = to_double(rx->cB);
-  data.cAp                   = to_double(rx->cAp);
-  data.cBp                   = to_double(rx->cBp);
-  data.squelch               = to_double(rx->squelch);
-  data.display_average_time  = to_double(rx->display_average_time);
-  data.volume                = to_double(rx->volume);
-  data.agc_gain              = to_double(rx->agc_gain);
-  data.agc_hang              = to_double(rx->agc_hang);
-  data.agc_thresh            = to_double(rx->agc_thresh);
-  data.agc_hang_threshold    = to_double(rx->agc_hang_threshold);
-  data.nr2_trained_threshold = to_double(rx->nr2_trained_threshold);
-  data.nr2_trained_t2        = to_double(rx->nr2_trained_t2);
-  data.nb_tau                = to_double(rx->nb_tau);
-  data.nb_hang               = to_double(rx->nb_hang);
-  data.nb_advtime            = to_double(rx->nb_advtime);
-  data.nb_thresh             = to_double(rx->nb_thresh);
-#ifdef EXTNR
-  data.nr4_reduction_amount  = to_double(rx->nr4_reduction_amount);
-  data.nr4_smoothing_factor  = to_double(rx->nr4_smoothing_factor);
-  data.nr4_whitening_factor  = to_double(rx->nr4_whitening_factor);
-  data.nr4_noise_rescale     = to_double(rx->nr4_noise_rescale);
-  data.nr4_post_threshold    = to_double(rx->nr4_post_threshold);
-#else
-  //
-  // If this side is not compiled with EXTNR, fill in default values
-  //
-  data.nr4_reduction_amount  = to_double(10.0);
-  data.nr4_smoothing_factor  = to_double(0.0);
-  data.nr4_whitening_factor  = to_double(0.0);
-  data.nr4_noise_rescale     = to_double(2.0);
-  data.nr4_post_threshold    = to_double(-10.0);
-#endif
+  data.cA                     = to_double(rx->cA);
+  data.cB                     = to_double(rx->cB);
+  data.cAp                    = to_double(rx->cAp);
+  data.cBp                    = to_double(rx->cBp);
+  data.squelch                = to_double(rx->squelch);
+  data.display_average_time   = to_double(rx->display_average_time);
+  data.volume                 = to_double(rx->volume);
+  data.agc_gain               = to_double(rx->agc_gain);
+  data.agc_hang               = to_double(rx->agc_hang);
+  data.agc_thresh             = to_double(rx->agc_thresh);
+  data.agc_hang_threshold     = to_double(rx->agc_hang_threshold);
+  data.nr2_trained_threshold  = to_double(rx->nr2_trained_threshold);
+  data.nr2_trained_t2         = to_double(rx->nr2_trained_t2);
+  data.nb_tau                 = to_double(rx->nb_tau);
+  data.nb_hang                = to_double(rx->nb_hang);
+  data.nb_advtime             = to_double(rx->nb_advtime);
+  data.nb_thresh              = to_double(rx->nb_thresh);
+  data.nr4_reduction_amount   = to_double(rx->nr4_reduction_amount);
+  data.nr4_smoothing_factor   = to_double(rx->nr4_smoothing_factor);
+  data.nr4_whitening_factor   = to_double(rx->nr4_whitening_factor);
+  data.nr4_noise_rescale      = to_double(rx->nr4_noise_rescale);
+  data.nr4_post_threshold     = to_double(rx->nr4_post_threshold);
 
   for (int i = 0; i < 11; i++) {
-    data.eq_freq[i]          = to_double(rx->eq_freq[i]);
-    data.eq_gain[i]          = to_double(rx->eq_gain[i]);
+    data.eq_freq[i]           = to_double(rx->eq_freq[i]);
+    data.eq_gain[i]           = to_double(rx->eq_gain[i]);
   }
 
-  data.fft_size              = to_ll(rx->fft_size);
-  data.sample_rate           = to_ll(rx->sample_rate);
-  send_bytes(sock, (char *)&data, sizeof(RECEIVER_DATA));
+  data.fft_size               = to_32(rx->fft_size);
+  data.sample_rate            = to_32(rx->sample_rate);
+  send_tcp(sock, (char *)&data, sizeof(RECEIVER_DATA));
 }
 
 void send_vfo_data(int sock, int v) {
   VFO_DATA vfo_data;
   SYNC(vfo_data.header.sync);
-  vfo_data.header.data_type = to_short(INFO_VFO);
+  vfo_data.header.data_type = to_16(INFO_VFO);
   vfo_data.vfo = v;
   vfo_data.band = vfo[v].band;
   vfo_data.bandstack = vfo[v].bandstack;
@@ -638,113 +619,113 @@ void send_vfo_data(int sock, int v) {
   vfo_data.xit_enabled = vfo[v].xit_enabled;
   vfo_data.cwAudioPeakFilter = vfo[v].cwAudioPeakFilter;
   //
-  vfo_data.rit_step  = to_short(vfo[v].rit_step);
-  vfo_data.deviation = to_short(vfo[v].deviation);
+  vfo_data.rit_step  = to_16(vfo[v].rit_step);
+  vfo_data.deviation = to_16(vfo[v].deviation);
   //
-  vfo_data.frequency = to_ll(vfo[v].frequency);
-  vfo_data.ctun_frequency = to_ll(vfo[v].ctun_frequency);
-  vfo_data.rit = to_ll(vfo[v].rit);
-  vfo_data.xit = to_ll(vfo[v].xit);
-  vfo_data.lo = to_ll(vfo[v].lo);
-  vfo_data.offset = to_ll(vfo[v].offset);
-  vfo_data.step   = to_ll(vfo[v].step);
-  send_bytes(sock, (char *)&vfo_data, sizeof(vfo_data));
+  vfo_data.frequency = to_64(vfo[v].frequency);
+  vfo_data.ctun_frequency = to_64(vfo[v].ctun_frequency);
+  vfo_data.rit = to_64(vfo[v].rit);
+  vfo_data.xit = to_64(vfo[v].xit);
+  vfo_data.lo = to_64(vfo[v].lo);
+  vfo_data.offset = to_64(vfo[v].offset);
+  vfo_data.step   = to_64(vfo[v].step);
+  send_tcp(sock, (char *)&vfo_data, sizeof(vfo_data));
 }
 
 
 void send_startstop_rxspectrum(int s, int id, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RX_SPECTRUM);
+  header.data_type = to_16(CMD_RX_SPECTRUM);
   header.b1 = id;
   header.b2 = state;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_startstop_txspectrum(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TX_SPECTRUM);
+  header.data_type = to_16(CMD_TX_SPECTRUM);
   header.b2 = state;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_vfo_frequency(int s, int v, long long hz) {
   U64_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_FREQ);
+  command.header.data_type = to_16(CMD_FREQ);
   command.header.b1 = v;
-  command.u64 = to_ll(hz);
-  send_bytes(s, (char *)&command, sizeof(command));
+  command.u64 = to_64(hz);
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_vfo_move_to(int s, int id, long long hz, int round) {
   U64_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_MOVETO);
+  command.header.data_type = to_16(CMD_MOVETO);
   command.header.b1 = id;
   command.header.b2 = round;
-  command.u64 = to_ll(hz);
-  send_bytes(s, (char *)&command, sizeof(command));
+  command.u64 = to_64(hz);
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_store(int s, int index) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_STORE);
+  header.data_type = to_16(CMD_STORE);
   header.b1 = index;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_restart(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RESTART);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_RESTART);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_recall(int s, int index) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RCL);
+  header.data_type = to_16(CMD_RCL);
   header.b1 = index;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_vfo_stepsize(int s, int v, int stepsize) {
-  U64_COMMAND command;
+  U32_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_VFO_STEPSIZE);
+  command.header.data_type = to_16(CMD_VFO_STEPSIZE);
   command.header.b1 = v;
-  command.u64 = to_ll(stepsize);
-  send_bytes(s, (char *)&command, sizeof(U64_COMMAND));
+  command.u32 = to_32(stepsize);
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_vfo_step(int s, int v, int steps) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_STEP);
+  header.data_type = to_16(CMD_STEP);
   header.b1 = v;
-  header.s1 = to_short(steps);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(steps);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_zoom(int s, const RECEIVER *rx) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_ZOOM);
+  header.data_type = to_16(CMD_ZOOM);
   header.b1 = rx->id;
   header.b2 = rx->zoom;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_meter(int s, int metermode, int alcmode) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_METER);
+  header.data_type = to_16(CMD_METER);
   header.b1 = metermode;
   header.b2 = alcmode;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_screen(int s, int hstack, int width) {
@@ -754,103 +735,103 @@ void send_screen(int s, int hstack, int width) {
   //
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_SCREEN);
+  header.data_type = to_16(CMD_SCREEN);
   header.b1 = hstack;
-  header.s1 = to_short(width);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(width);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_pan(int s, const RECEIVER *rx) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_PAN);
+  header.data_type = to_16(CMD_PAN);
   header.b1 = rx->id;
   header.b2 = rx->pan;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_drive(int s, double value) {
   DOUBLE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_DRIVE);
+  command.header.data_type = to_16(CMD_DRIVE);
   command.dbl = to_double(value);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_micgain(int s, double gain) {
   DOUBLE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_MICGAIN);
+  command.header.data_type = to_16(CMD_MICGAIN);
   command.dbl = to_double(gain);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_volume(int s, int id, double volume) {
   DOUBLE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_VOLUME);
+  command.header.data_type = to_16(CMD_VOLUME);
   command.header.b1 = id;
   command.dbl = to_double(volume);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_diversity(int s, int enabled, double gain, double phase) {
   DIVERSITY_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_DIVERSITY);
+  command.header.data_type = to_16(CMD_DIVERSITY);
   command.diversity_enabled = enabled;
   command.div_gain = to_double(gain);
   command.div_phase =  to_double(phase);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_agc(int s, int id, int agc) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_AGC);
+  header.data_type = to_16(CMD_AGC);
   header.b1 = id;
   header.b2 = agc;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_agc_gain(int s, const RECEIVER *rx) {
   AGC_GAIN_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_AGC_GAIN);
+  command.header.data_type = to_16(CMD_AGC_GAIN);
   command.id = rx->id;
   command.gain = to_double(rx->agc_gain);
   command.hang = to_double(rx->agc_hang);
   command.thresh = to_double(rx->agc_thresh);
   command.hang_thresh = to_double(rx->agc_hang_threshold);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_rfgain(int s, int id, double gain) {
   DOUBLE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_RFGAIN);
+  command.header.data_type = to_16(CMD_RFGAIN);
   command.header.b1 = id;
   command.dbl = to_double(gain);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_attenuation(int s, int id, int attenuation) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_ATTENUATION);
+  header.data_type = to_16(CMD_ATTENUATION);
   header.b1 = id;
-  header.s1 = to_short(attenuation);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(attenuation);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_squelch(int s, int id, int enable, double squelch) {
   DOUBLE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_SQUELCH);
+  command.header.data_type = to_16(CMD_SQUELCH);
   command.header.b1 = id;
   command.header.b2 = enable;
   command.dbl = to_double(squelch);
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_eq(int s, int id) {
@@ -863,7 +844,7 @@ void send_eq(int s, int id) {
 
   if (id < RECEIVERS) {
     const RECEIVER *rx = receiver[id];
-    command.header.data_type = to_short(CMD_RX_EQ);
+    command.header.data_type = to_16(CMD_RX_EQ);
     command.enable = rx->eq_enable;
 
     for (int i = 0; i < 11; i++) {
@@ -871,7 +852,7 @@ void send_eq(int s, int id) {
       command.gain[i] = to_double(rx->eq_gain[i]);
     }
   } else if (id == 8) {
-    command.header.data_type = to_short(CMD_TX_EQ);
+    command.header.data_type = to_16(CMD_TX_EQ);
 
     if (can_transmit) {
       command.enable = transmitter->eq_enable;
@@ -883,7 +864,7 @@ void send_eq(int s, int id) {
     }
   }
 
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_noise(int s, const RECEIVER *rx) {
@@ -893,7 +874,7 @@ void send_noise(int s, const RECEIVER *rx) {
   //
   NOISE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_NOISE);
+  command.header.data_type = to_16(CMD_NOISE);
   command.id                        = rx->id;
   command.nb                        = rx->nb;
   command.nr                        = rx->nr;
@@ -903,114 +884,115 @@ void send_noise(int s, const RECEIVER *rx) {
   command.nr_agc                    = rx->nr_agc;
   command.nr2_gain_method           = rx->nr2_gain_method;
   command.nr2_npe_method            = rx->nr2_npe_method;
-  command.nr2_ae                    = rx->nr2_ae;
+  command.nr2_post                  = rx->nr2_post;
+  command.nr2_post_taper            = rx->nr2_post_taper;
+  command.nr2_post_nlevel           = rx->nr2_post_nlevel;
+  command.nr2_post_factor           = rx->nr2_post_factor;
+  command.nr2_post_rate             = rx->nr2_post_rate;
+  command.nr4_noise_scaling_type    = rx->nr4_noise_scaling_type;
   command.nb_tau                    = to_double(rx->nb_tau);
   command.nb_hang                   = to_double(rx->nb_hang);
   command.nb_advtime                = to_double(rx->nb_advtime);
   command.nb_thresh                 = to_double(rx->nb_thresh);
   command.nr2_trained_threshold     = to_double(rx->nr2_trained_threshold);
   command.nr2_trained_t2            = to_double(rx->nr2_trained_t2);
-#ifdef EXTNR
   command.nr4_reduction_amount      = to_double(rx->nr4_reduction_amount);
   command.nr4_smoothing_factor      = to_double(rx->nr4_smoothing_factor);
   command.nr4_whitening_factor      = to_double(rx->nr4_whitening_factor);
   command.nr4_noise_rescale         = to_double(rx->nr4_noise_rescale);
   command.nr4_post_threshold        = to_double(rx->nr4_post_threshold);
-#else
-  //
-  // If this side is not compiled with EXTNR, fill in default values
-  //
-  command.nr4_reduction_amount      = to_double(10.0);
-  command.nr4_smoothing_factor      = to_double(0.0);
-  command.nr4_whitening_factor      = to_double(0.0);
-  command.nr4_noise_rescale         = to_double(2.0);
-  command.nr4_post_threshold        = to_double(-10.0);
-#endif
-  send_bytes(s, (char *)&command, sizeof(command));
+  send_tcp(s, (char *)&command, sizeof(command));
+}
+
+void send_replay(int s) {
+  HEADER header;
+  SYNC(header.sync);
+  header.data_type = to_16(CMD_REPLAY);
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_capture(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_CAPTURE);
-  send_bytes(s, (char *)&header, sizeof(header));
+  header.data_type = to_16(CMD_CAPTURE);
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_bandstack(int s, int old, int new) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_BANDSTACK);
+  header.data_type = to_16(CMD_BANDSTACK);
   header.b1 = old;
   header.b2 = new;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_band(int s, int v, int band) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_BAND_SEL);
+  header.data_type = to_16(CMD_BAND_SEL);
   header.b1 = v;
   header.b2 = band;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_twotone(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TWOTONE);
+  header.data_type = to_16(CMD_TWOTONE);
   header.b1 = state;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_tune(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TUNE);
+  header.data_type = to_16(CMD_TUNE);
   header.b1 = state;
-  header.s1 = to_short(full_tune);
-  header.s2 = to_short(memory_tune);
-  send_bytes(s, (char *)&header, sizeof(header));
+  header.s1 = to_16(full_tune);
+  header.s2 = to_16(memory_tune);
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_vox(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_VOX);
+  header.data_type = to_16(CMD_VOX);
   header.b1 = state;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_toggle_mox(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TOGGLE_MOX);
-  send_bytes(s, (char *)&header, sizeof(header));
+  header.data_type = to_16(CMD_TOGGLE_MOX);
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_toggle_tune(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TOGGLE_TUNE);
-  header.s1 = to_short(full_tune);
-  header.s2 = to_short(memory_tune);
-  send_bytes(s, (char *)&header, sizeof(header));
+  header.data_type = to_16(CMD_TOGGLE_TUNE);
+  header.s1 = to_16(full_tune);
+  header.s2 = to_16(memory_tune);
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_mox(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_MOX);
+  header.data_type = to_16(CMD_MOX);
   header.b1 = state;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_mode(int s, int v, int mode) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_MODE);
+  header.data_type = to_16(CMD_MODE);
   header.b1 = v;
   header.b2 = mode;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_filter_var(int s, int m, int f) {
@@ -1022,12 +1004,12 @@ void send_filter_var(int s, int m, int f) {
   if (f == filterVar1 || f == filterVar2) {
     HEADER header;
     SYNC(header.sync);
-    header.data_type = to_short(CMD_FILTER_VAR);
+    header.data_type = to_16(CMD_FILTER_VAR);
     header.b1 = m;
     header.b2 = f;
-    header.s1 = to_short(filters[m][f].low);
-    header.s2 = to_short(filters[m][f].high);
-    send_bytes(s, (char *)&header, sizeof(HEADER));
+    header.s1 = to_16(filters[m][f].low);
+    header.s2 = to_16(filters[m][f].high);
+    send_tcp(s, (char *)&header, sizeof(HEADER));
   }
 }
 
@@ -1037,15 +1019,15 @@ void send_rx_filter_cut(int s, int id) {
   //
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RX_FILTER_CUT);
+  header.data_type = to_16(CMD_RX_FILTER_CUT);
   header.b1 = id;
 
   if (id < receivers) {
-    header.s1  =  to_short(receiver[id]->filter_low);
-    header.s2  =  to_short(receiver[id]->filter_high);
+    header.s1  =  to_16(receiver[id]->filter_low);
+    header.s2  =  to_16(receiver[id]->filter_high);
   }
 
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_tx_filter_cut(int s) {
@@ -1054,14 +1036,14 @@ void send_tx_filter_cut(int s) {
   //
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TX_FILTER_CUT);
+  header.data_type = to_16(CMD_TX_FILTER_CUT);
 
   if (can_transmit) {
-    header.s1  =  to_short(transmitter->filter_low);
-    header.s2  =  to_short(transmitter->filter_high);
+    header.s1  =  to_16(transmitter->filter_low);
+    header.s2  =  to_16(transmitter->filter_high);
   }
 
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_filter_sel(int s, int v, int f) {
@@ -1070,44 +1052,44 @@ void send_filter_sel(int s, int v, int f) {
   //
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_FILTER_SEL);
+  header.data_type = to_16(CMD_FILTER_SEL);
   header.b1 = v;
   header.b2 = f;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_sidetone_freq(int s, int f) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_SIDETONEFREQ);
-  header.s1 = to_short(f);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_SIDETONEFREQ);
+  header.s1 = to_16(f);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_cwpeak(int s, int v, int p) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_CWPEAK);
+  header.data_type = to_16(CMD_CWPEAK);
   header.b1 = v;
   header.b2 = p;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_digidrivemax(int s) {
   DOUBLE_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_DIGIMAX);
+  command.header.data_type = to_16(CMD_DIGIMAX);
   command.dbl = to_double(drive_digi_max);
-  send_bytes(s, (char *)&command, sizeof(DOUBLE_COMMAND));
+  send_tcp(s, (char *)&command, sizeof(DOUBLE_COMMAND));
 }
 
 void send_am_carrier(int s) {
   if (can_transmit) {
     DOUBLE_COMMAND command;
     SYNC(command.header.sync);
-    command.header.data_type = to_short(CMD_AMCARRIER);
+    command.header.data_type = to_16(CMD_AMCARRIER);
     command.dbl = to_double(transmitter->am_carrier_level);
-    send_bytes(s, (char *)&command, sizeof(DOUBLE_COMMAND));
+    send_tcp(s, (char *)&command, sizeof(DOUBLE_COMMAND));
   }
 }
 
@@ -1115,19 +1097,19 @@ void send_dexp(int s) {
   if (can_transmit) {
     DEXP_DATA command;
     SYNC(command.header.sync);
-    command.header.data_type = to_short(CMD_DEXP);
+    command.header.data_type = to_16(CMD_DEXP);
     command.dexp = transmitter->dexp;
     command.dexp_filter = transmitter->dexp_filter;
-    command.dexp_trigger = to_short(transmitter->dexp_trigger);
-    command.dexp_exp = to_short(transmitter->dexp_exp);
-    command.dexp_filter_low = to_short(transmitter->dexp_filter_low);
-    command.dexp_filter_high = to_short(transmitter->dexp_filter_high);
+    command.dexp_trigger = to_16(transmitter->dexp_trigger);
+    command.dexp_exp = to_16(transmitter->dexp_exp);
+    command.dexp_filter_low = to_16(transmitter->dexp_filter_low);
+    command.dexp_filter_high = to_16(transmitter->dexp_filter_high);
     command.dexp_tau = to_double(transmitter->dexp_tau);
     command.dexp_attack = to_double(transmitter->dexp_attack);
     command.dexp_release = to_double(transmitter->dexp_release);
     command.dexp_hold = to_double(transmitter->dexp_hold);
     command.dexp_hyst = to_double(transmitter->dexp_hyst);
-    send_bytes(s, (char *)&command, sizeof(DEXP_DATA));
+    send_tcp(s, (char *)&command, sizeof(DEXP_DATA));
   }
 }
 
@@ -1135,7 +1117,7 @@ void send_tx_compressor(int s) {
   if (can_transmit) {
     COMPRESSOR_DATA command;
     SYNC(command.header.sync);
-    command.header.data_type = to_short(CMD_COMPRESSOR);
+    command.header.data_type = to_16(CMD_COMPRESSOR);
     command.compressor = transmitter->compressor;
     command.cfc = transmitter->cfc;
     command.cfc_eq = transmitter->cfc_eq;
@@ -1147,7 +1129,7 @@ void send_tx_compressor(int s) {
       command.cfc_post[i] = to_double(transmitter->cfc_post[i]);
     }
 
-    send_bytes(s, (char *)&command, sizeof(COMPRESSOR_DATA));
+    send_tcp(s, (char *)&command, sizeof(COMPRESSOR_DATA));
   }
 }
 
@@ -1155,15 +1137,12 @@ void send_txmenu(int s) {
   if (can_transmit) {
     TXMENU_DATA command;
     SYNC(command.header.sync);
-    command.header.data_type = to_short(CMD_TXMENU);
+    command.header.data_type = to_16(CMD_TXMENU);
     command.tune_drive = transmitter->tune_drive;
     command.tune_use_drive = transmitter->tune_use_drive;
     command.swr_protection = transmitter->swr_protection;
-    command.mic_boost = mic_boost;
-    command.mic_linein = mic_linein;
-    command.linein_gain = to_double(linein_gain);
     command.swr_alarm = to_double(transmitter->swr_alarm);
-    send_bytes(s, (char *)&command, sizeof(TXMENU_DATA));
+    send_tcp(s, (char *)&command, sizeof(TXMENU_DATA));
   }
 }
 
@@ -1171,10 +1150,10 @@ void send_ctcss(int s) {
   if (can_transmit) {
     HEADER header;
     SYNC(header.sync);
-    header.data_type = to_short(CMD_CTCSS);
+    header.data_type = to_16(CMD_CTCSS);
     header.b1 = transmitter->ctcss_enabled;
     header.b2 = transmitter->ctcss;
-    send_bytes(s, (char *)&header, sizeof(HEADER));
+    send_tcp(s, (char *)&header, sizeof(HEADER));
   }
 }
 
@@ -1182,11 +1161,11 @@ void send_txfilter(int s) {
   if (can_transmit) {
     HEADER header;
     SYNC(header.sync);
-    header.data_type = to_short(CMD_TXFILTER);
+    header.data_type = to_16(CMD_TXFILTER);
     header.b1 = transmitter->use_rx_filter;
-    header.s1 = to_short(transmitter->default_filter_low);
-    header.s2 = to_short(transmitter->default_filter_high);
-    send_bytes(s, (char *)&header, sizeof(HEADER));
+    header.s1 = to_16(transmitter->default_filter_low);
+    header.s2 = to_16(transmitter->default_filter_high);
+    send_tcp(s, (char *)&header, sizeof(HEADER));
   }
 }
 
@@ -1194,43 +1173,43 @@ void send_preemp(int s) {
   if (can_transmit) {
     HEADER header;
     SYNC(header.sync);
-    header.data_type = to_short(CMD_PREEMP);
+    header.data_type = to_16(CMD_PREEMP);
     header.b1 = transmitter->pre_emphasize;
-    send_bytes(s, (char *)&header, sizeof(HEADER));
+    send_tcp(s, (char *)&header, sizeof(HEADER));
   }
 }
 
 void send_psparams(int s, const TRANSMITTER *tx) {
   PS_PARAMS params;
   SYNC(params.header.sync);
-  params.header.data_type = to_short(CMD_PSPARAMS);
+  params.header.data_type = to_16(CMD_PSPARAMS);
   params.ps_ptol = tx->ps_ptol;
   params.ps_oneshot = tx->ps_oneshot;
   params.ps_map = tx->ps_map;
   params.ps_setpk = to_double(tx->ps_setpk);
-  send_bytes(s, (char *)&params, sizeof(PS_PARAMS));
+  send_tcp(s, (char *)&params, sizeof(PS_PARAMS));
 }
 
 void send_psresume(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_PSRESUME);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_PSRESUME);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_psreset(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_PSRESET);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_PSRESET);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_psonoff(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_PSONOFF);
+  header.data_type = to_16(CMD_PSONOFF);
   header.b1 = state;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_psatt(int s) {
@@ -1239,156 +1218,179 @@ void send_psatt(int s) {
   if (can_transmit) {
     HEADER header;
     SYNC(header.sync);
-    header.data_type = to_short(CMD_PSATT);
+    header.data_type = to_16(CMD_PSATT);
     header.b1 = transmitter->auto_on;
     header.b2 = transmitter->feedback;
-    header.s1 = to_short(transmitter->attenuation);
-    header.s2 = to_short(adc[2].antenna);
-    send_bytes(s, (char *)&header, sizeof(HEADER));
+    header.s1 = to_16(transmitter->attenuation);
+    header.s2 = to_16(adc[2].antenna);
+    send_tcp(s, (char *)&header, sizeof(HEADER));
   }
 }
 
 void send_afbinaural(int s, const RECEIVER *rx) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_BINAURAL);
+  header.data_type = to_16(CMD_BINAURAL);
   header.b1 = rx->id;
   header.b2 = rx->binaural;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_rx_fft(int s, const RECEIVER *rx) {
-  U64_COMMAND command;
+  U32_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_RXFFT);
+  command.header.data_type = to_16(CMD_RXFFT);
   command.header.b1 = rx->id;
   command.header.b2 = rx->low_latency;
-  command.u64 = to_ll(rx->fft_size);
-  send_bytes(s, (char *)&command, sizeof(U64_COMMAND));
+  command.u32 = to_32(rx->fft_size);
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_tx_fft(int s, const TRANSMITTER *tx) {
-  U64_COMMAND command;
+  U32_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_TXFFT);
+  command.header.data_type = to_16(CMD_TXFFT);
   command.header.b1 = tx->id;
-  command.u64 = to_ll(tx->fft_size);
-  send_bytes(s, (char *)&command, sizeof(U64_COMMAND));
+  command.u32 = to_32(tx->fft_size);
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_patrim(int s) {
   PATRIM_DATA command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_PATRIM);
-  command.pa_power = pa_power;
+  command.header.data_type = to_16(CMD_PATRIM);
+  command.pa_power = to_16(pa_power);
 
   for (int i = 0; i < 11; i++) {
     command.pa_trim[i] = to_double(pa_trim[i]);
   }
 
-  send_bytes(s, (char *)&command, sizeof(PATRIM_DATA));
+  send_tcp(s, (char *)&command, sizeof(PATRIM_DATA));
 }
 
 void send_deviation(int s, int v, int dev) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_DEVIATION);
+  header.data_type = to_16(CMD_DEVIATION);
   header.b1 = v;
-  header.s1 = to_short(dev);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(dev);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_vfo_atob(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_VFO_A_TO_B);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_VFO_A_TO_B);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_vfo_btoa(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_VFO_B_TO_A);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_VFO_B_TO_A);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_vfo_swap(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_VFO_SWAP);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_VFO_SWAP);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_heartbeat(int s) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_HEARTBEAT);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.data_type = to_16(CMD_HEARTBEAT);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_soapy_rxant(int s, int id) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_SOAPY_RXANT);
+  header.data_type = to_16(CMD_SOAPY_RXANT);
   header.b1 = id;
   header.b2 = adc[id].antenna;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_soapy_txant(int s) {
   if (can_transmit) {
     HEADER header;
     SYNC(header.sync);
-    header.data_type = to_short(CMD_SOAPY_TXANT);
+    header.data_type = to_16(CMD_SOAPY_TXANT);
     header.b1 = transmitter->antenna;
-    send_bytes(s, (char *)&header, sizeof(HEADER));
+    send_tcp(s, (char *)&header, sizeof(HEADER));
   }
 }
 
 void send_soapy_agc(int s, int id) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_SOAPY_AGC);
+  header.data_type = to_16(CMD_SOAPY_AGC);
   header.b1 = id;
   header.b2 = adc[id].agc;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_split(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_SPLIT);
+  header.data_type = to_16(CMD_SPLIT);
   header.b1 = state;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_cw(int s, int state, int wait) {
   //
-  // Send this in one header although wait may exceed a short
+  // Only sent from the client. Encode wait-time in two shorts
+  // (12 bit each) to get a header-only message.
   //
+  static double last = 0.0;
+  double now, elapsed;
+  struct timespec ts;
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_CW);
+  header.data_type = to_16(CMD_CW);
+  //
+  // If this is the first key-down after a pause: send
+  // two CW events, the first one is simply a 100-msec-pause
+  // such that on the server side, everything what follows
+  // is slightly delayed to provide some head-room against
+  // jitters
+  //
+  clock_gettime(CLOCK_MONOTONIC, &ts);
+  now = ts.tv_sec + 1.0E-9 * ts.tv_nsec;
+  elapsed = now - last;
+  last = now;
+
+  if (state && elapsed > 0.5) {
+    header.b1 = 0;
+    header.s1 = to_16(1);     // 4800 * 4096 + 704
+    header.s2 = to_16(704);
+    send_tcp(s, (char *)&header, sizeof(HEADER));
+  }
+
   header.b1  = state;
-  header.s1 = to_short(wait >> 12);
-  header.s2 = to_short(wait & 0xFFF);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(wait >> 12);
+  header.s2 = to_16(wait & 0xFFF);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_sat(int s, int sat) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_SAT);
+  header.data_type = to_16(CMD_SAT);
   header.b1  = sat;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_duplex(int s, int state) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_DUP);
+  header.data_type = to_16(CMD_DUP);
   header.b1 = state;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_display(int s, int id) {
@@ -1397,132 +1399,131 @@ void send_display(int s, int id) {
   command.header.b1 = id;
 
   if (id < RECEIVERS) {
-    command.header.data_type = to_short(CMD_RX_DISPLAY);
+    command.header.data_type = to_16(CMD_RX_DISPLAY);
     command.header.b2 = receiver[id]->display_detector_mode;
-    command.header.s1 = to_short(receiver[id]->display_average_mode);
+    command.header.s1 = to_16(receiver[id]->display_average_mode);
     command.dbl = to_double(receiver[id]->display_average_time);
   } else if (can_transmit) {
-    command.header.data_type = to_short(CMD_TX_DISPLAY);
+    command.header.data_type = to_16(CMD_TX_DISPLAY);
     command.header.b2 = transmitter->display_detector_mode;
-    command.header.s1 = to_short(transmitter->display_average_mode);
+    command.header.s1 = to_16(transmitter->display_average_mode);
     command.dbl = to_double(transmitter->display_average_time);
   }
 
-  send_bytes(s, (char *)&command, sizeof(DOUBLE_COMMAND));
+  send_tcp(s, (char *)&command, sizeof(DOUBLE_COMMAND));
 }
 
 void send_rxfps(int s, int id, int fps) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RX_FPS);
+  header.data_type = to_16(CMD_RX_FPS);
   header.b1 = id;
   header.b2 = fps;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_txfps(int s, int fps) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_TX_FPS);
+  header.data_type = to_16(CMD_TX_FPS);
   header.b2 = fps;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_lock(int s, int lock) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_LOCK);
+  header.data_type = to_16(CMD_LOCK);
   header.b1 = lock;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_ctun(int s, int vfo, int ctun) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_CTUN);
+  header.data_type = to_16(CMD_CTUN);
   header.b1 = vfo;
   header.b2 = ctun;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_rx_select(int s, int id) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RX_SELECT);
+  header.data_type = to_16(CMD_RX_SELECT);
   header.b1 = id;
-  send_bytes(s, (char *)&header, sizeof(header));
+  send_tcp(s, (char *)&header, sizeof(header));
 }
 
 void send_rit(int s, int id) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RIT);
+  header.data_type = to_16(CMD_RIT);
   header.b1 = id;
   header.b2 = vfo[id].rit_enabled;
-  header.s1 = to_short(vfo[id].rit);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(vfo[id].rit);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_xit(int s, int id) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_XIT);
+  header.data_type = to_16(CMD_XIT);
   header.b1 = id;
   header.b2 = vfo[id].xit_enabled;
-  header.s1 = to_short(vfo[id].xit);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(vfo[id].xit);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_sample_rate(int s, int id, int sample_rate) {
-  U64_COMMAND command;
-  long long rate = (long long)sample_rate;
+  U32_COMMAND command;
   SYNC(command.header.sync);
-  command.header.data_type = to_short(CMD_SAMPLE_RATE);
+  command.header.data_type = to_16(CMD_SAMPLE_RATE);
   command.header.b1 = id;
-  command.u64 = to_ll(rate);
-  send_bytes(s, (char *)&command, sizeof(command));
+  command.u32 = to_32(sample_rate);
+  send_tcp(s, (char *)&command, sizeof(command));
 }
 
 void send_receivers(int s, int receivers) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RECEIVERS);
+  header.data_type = to_16(CMD_RECEIVERS);
   header.b1 = receivers;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_rit_step(int s, int v, int step) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_RIT_STEP);
+  header.data_type = to_16(CMD_RIT_STEP);
   header.b1 = v;
-  header.s1 = to_short(step);
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  header.s1 = to_16(step);
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_filter_board(int s, int filter_board) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_FILTER_BOARD);
+  header.data_type = to_16(CMD_FILTER_BOARD);
   header.b1 = filter_board;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_adc(int s, int id, int adc) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_ADC);
+  header.data_type = to_16(CMD_ADC);
   header.b1 = id;
   header.b2 = adc;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_anan10E(int s, int new) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_ANAN10E);
+  header.data_type = to_16(CMD_ANAN10E);
   header.b1 = new;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_region(int s, int region) {
@@ -1532,17 +1533,17 @@ void send_region(int s, int region) {
   //
   radio_change_region(region);
   SYNC(header.sync);
-  header.data_type = to_short(CMD_REGION);
+  header.data_type = to_16(CMD_REGION);
   header.b1 = region;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 
 void send_mute_rx(int s, int id, int mute) {
   HEADER header;
   SYNC(header.sync);
-  header.data_type = to_short(CMD_MUTE_RX);
+  header.data_type = to_16(CMD_MUTE_RX);
   header.b1 = id;
   header.b2 = mute;
-  send_bytes(s, (char *)&header, sizeof(HEADER));
+  send_tcp(s, (char *)&header, sizeof(HEADER));
 }
 

@@ -18,13 +18,7 @@
 */
 
 #include <gtk/gtk.h>
-#include <semaphore.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
-#include "ant_menu.h"
 #include "band.h"
 #include "client_server.h"
 #include "message.h"
@@ -40,7 +34,7 @@ static GtkWidget *grid = NULL;
 static GtkWidget *hf_container = NULL;
 static GtkWidget *xvtr_container = NULL;
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -51,7 +45,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -63,9 +57,9 @@ static void rx_ant_cb(GtkToggleButton *widget, gpointer data) {
   band->RxAntenna = ant;
 
   if (radio_is_remote) {
-    send_band_data(client_socket, b);
+    send_band_data(cl_sock_tcp, b);
   } else {
-    radio_apply_band_settings(0);
+    radio_apply_band_settings(0, 0);
   }
 }
 
@@ -76,9 +70,9 @@ static void tx_ant_cb(GtkToggleButton *widget, gpointer data) {
   band->TxAntenna = ant;
 
   if (radio_is_remote) {
-    send_band_data(client_socket, b);
+    send_band_data(cl_sock_tcp, b);
   } else {
-    radio_apply_band_settings(0);
+    radio_apply_band_settings(0, 0);
   }
 }
 
@@ -93,7 +87,7 @@ static void adc_antenna_cb(GtkComboBox *widget, gpointer data) {
 
   if (device == SOAPYSDR_USB_DEVICE) {
     if (radio_is_remote) {
-      send_soapy_rxant(client_socket, id);
+      send_soapy_rxant(cl_sock_tcp, id);
     } else {
 #ifdef SOAPYSDR
       soapy_protocol_set_rx_antenna(id, ant);
@@ -118,7 +112,7 @@ static void dac_antenna_cb(GtkComboBox *widget, gpointer data) {
 
   if (device == SOAPYSDR_USB_DEVICE) {
     if (radio_is_remote) {
-      send_soapy_txant(client_socket);
+      send_soapy_txant(cl_sock_tcp);
     } else {
 #ifdef SOAPYSDR
       soapy_protocol_set_tx_antenna(transmitter->antenna);
@@ -127,7 +121,7 @@ static void dac_antenna_cb(GtkComboBox *widget, gpointer data) {
   }
 }
 
-static void show_hf() {
+static void show_hf(void) {
   GtkWidget *label;
   int bands = radio_max_band();
   hf_container = gtk_fixed_new();
@@ -206,7 +200,7 @@ static void show_hf() {
   gtk_container_add(GTK_CONTAINER(hf_container), mygrid);
 }
 
-static void show_xvtr() {
+static void show_xvtr(void) {
   GtkWidget *label; // re-used for all labels
   int num = 0;
 
@@ -308,20 +302,6 @@ static void xvtr_rb_cb(GtkWidget *widget, GdkEventButton *event, gpointer data) 
   if (hf_container   != NULL) { gtk_widget_hide(hf_container  ); }
 }
 
-static void newpa_cb(GtkWidget *widget, gpointer data) {
-  if (gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget))) {
-    new_pa_board = 1;
-  } else {
-    new_pa_board = 0;
-  }
-
-  if (radio_is_remote) {
-    send_radiomenu(client_socket);
-  } else {
-    schedule_high_priority();
-  }
-}
-
 void ant_menu(GtkWidget *parent) {
   dialog = gtk_dialog_new();
   gtk_window_set_transient_for(GTK_WINDOW(dialog), GTK_WINDOW(parent));
@@ -351,20 +331,6 @@ void ant_menu(GtkWidget *parent) {
     gtk_grid_attach(GTK_GRID(grid), xvtr_rb, 2, 0, 1, 1);
   }
 
-  if (device == NEW_DEVICE_HERMES || device == NEW_DEVICE_ANGELIA || device == NEW_DEVICE_ORION ||
-      device == DEVICE_HERMES     || device == DEVICE_ANGELIA     || device == DEVICE_ORION) {
-    //
-    // ANAN-100/200: There is an "old" (Rev. 15/16) and "new" (Rev. 24) PA board
-    //               around which differs in relay settings for using EXT1,2 and
-    //               differs in how to do PS feedback.
-    //
-    GtkWidget *new_pa_b = gtk_check_button_new_with_label("ANAN 100/200 new PA board");
-    gtk_widget_set_name(new_pa_b, "boldlabel");
-    gtk_toggle_button_set_active(GTK_TOGGLE_BUTTON(new_pa_b), new_pa_board);
-    gtk_grid_attach(GTK_GRID(grid), new_pa_b, 3, 0, 5, 1);
-    g_signal_connect(new_pa_b, "toggled", G_CALLBACK(newpa_cb), NULL);
-  }
-
   if (protocol == ORIGINAL_PROTOCOL || protocol == NEW_PROTOCOL) {
     show_hf();
     show_xvtr();
@@ -376,7 +342,7 @@ void ant_menu(GtkWidget *parent) {
     for (int id = 0; id < RECEIVERS; id++) {
       if (radio->soapy.rx[id].antennas > 0) {
         char text[64];
-        snprintf(text, sizeof(text), "RX%d Antenna:", id + 1);
+        snprintf(text, sizeof(text), "RX%d Antenna", id + 1);
         GtkWidget *label = gtk_label_new(text);
         gtk_widget_set_name(label, "boldlabel");
         gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
@@ -394,7 +360,7 @@ void ant_menu(GtkWidget *parent) {
     }
 
     if (can_transmit && radio->soapy.tx.antennas > 0) {
-      GtkWidget *label = gtk_label_new("TX Antenna:");
+      GtkWidget *label = gtk_label_new("TX Antenna");
       gtk_widget_set_name(label, "boldlabel");
       gtk_grid_attach(GTK_GRID(grid), label, 0, row, 1, 1);
       GtkWidget *box = gtk_combo_box_text_new();

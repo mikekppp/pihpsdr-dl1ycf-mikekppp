@@ -18,14 +18,9 @@
 */
 
 #include <gtk/gtk.h>
-#include <stdio.h>
-#include <stdint.h>
-#include <stdlib.h>
-#include <string.h>
 
 #include "band.h"
 #include "bandstack.h"
-#include "bandstack_menu.h"
 #include "filter.h"
 #include "new_menu.h"
 #include "radio.h"
@@ -48,7 +43,7 @@ static int myvfo;
 static struct _CHOICE *first = NULL;
 static struct _CHOICE *current = NULL;
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -67,7 +62,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }

@@ -87,10 +87,10 @@ extern void filter_board_changed(void);
 extern void pa_changed(void);
 extern void tuner_changed(void);
 
-extern void new_protocol_audio_samples(short left_audio_sample, short right_audio_sample);
-extern void new_protocol_iq_samples(int isample, int qsample);
+extern void new_protocol_audio_samples(double left, double right);
+extern void new_protocol_iq_samples(double isample, double qsample);
 extern void new_protocol_flush_iq_samples(void);
-extern void new_protocol_cw_audio_samples(short l, short r);
+extern void new_protocol_tx_audio_samples(double sample);
 
 extern void new_protocol_menu_start(void);
 extern void new_protocol_menu_stop(void);
@@ -103,19 +103,20 @@ extern void saturn_post_high_priority(mybuffer *buffer);
 // after a RXTX transition are dumped to a file at the
 // next TXRX transition. The value of DUMP_TX_DATA
 // allows to dump either the TX IQ data sent to the radio,
-// the RX or TX feedback data. PURESIGNAL must be enabled
-// to provide this data.
+// or the RX or TX feedback data. PURESIGNAL must be enabled
+// to use TXFDBK or RXFDBK.
+// (This is only implemented for P2).
 //
 #define DUMP_TXIQ   1
 #define DUMP_TXFDBK 2
 #define DUMP_RXFDBK 3
 
-//#define DUMP_TX_DATA DUMP_RXFDBK
+//#define DUMP_TX_DATA DUMP_TXIQ
 
 #ifdef DUMP_TX_DATA
   extern int rxiq_count;
-  extern long rxiqi[];
-  extern long rxiqq[];
+  extern double rxiqi[];
+  extern double rxiqq[];
 #endif
 
 #endif

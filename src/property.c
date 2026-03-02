@@ -30,14 +30,14 @@
 
 PROPERTY* properties = NULL;
 
-void clearProperties() {
+void clearProperties(void) {
   if (properties != NULL) {
     // free all the properties
     PROPERTY *next;
 
     while (properties != NULL) {
       next = properties->next_property;
-      free(properties);
+      g_free(properties);
       properties = next;
     }
   }
@@ -97,10 +97,10 @@ void loadProperties(const char* filename) {
 
         // Beware of "illegal" lines in corrupted files
         if (name != NULL && value != NULL) {
-          property = malloc(sizeof(PROPERTY));
+          property = g_new(PROPERTY, 1);
 
           if (!property) {
-            fatal_error("FATAL: property malloc");
+            fatal_error("FATAL: property alloc");
           } else {
             property->name = g_strdup(name);
             property->value = g_strdup(value);
@@ -133,7 +133,7 @@ void loadProperties(const char* filename) {
 * @param filename
 */
 void saveProperties(const char* filename) {
-  PROPERTY* property;
+  const PROPERTY* property;
   FILE* f = fopen(filename, "w+");
   char line[1024];
 
@@ -147,8 +147,11 @@ void saveProperties(const char* filename) {
   property = properties;
 
   while (property) {
-    snprintf(line, sizeof(line), "%s=%s\n", property->name, property->value);
-    fwrite(line, 1, strlen(line), f);
+    if (*property->value) {
+      snprintf(line, sizeof(line), "%s=%s\n", property->name, property->value);
+      fwrite(line, 1, strlen(line), f);
+    }
+
     property = property->next_property;
   }
 
@@ -199,14 +202,14 @@ void setProperty(const char* name, const char* value) {
 
   if (property) {
     // just update
-    free(property->value);
+    g_free(property->value);
     property->value = g_strdup(value);
   } else {
     // new property
-    property = malloc(sizeof(PROPERTY));
+    property = g_new(PROPERTY, 1);
 
     if (!property) {
-      fatal_error("FATAL: property malloc");
+      fatal_error("FATAL: property alloc");
     } else {
       property->name = g_strdup(name);
       property->value = g_strdup(value);
@@ -214,5 +217,33 @@ void setProperty(const char* name, const char* value) {
       properties = property;
     }
   }
+}
+
+//
+// Utility function myatof
+//
+// Now we force the C locale, but data in the props file may still have been written
+// out using local conventions (e.g. a comma instead of a decimal point in Germany)
+// To handle (at least) this case, all commas in the input string are replaced by
+// decimal points and then this is fed to atof()
+//
+double myatof(const char* string) {
+  char *lstr = g_strdup(string);
+  double ret;
+
+  //
+  // Emergency fallback (will work in 99.99% of the cases)
+  //
+  if (lstr == NULL) {
+    return atof(string);
+  }
+
+  for (char *cp = lstr; *cp; cp++) {
+    if (*cp == ',') { *cp = '.'; }
+  }
+
+  ret = atof(lstr);
+  g_free(lstr);
+  return ret;
 }
 

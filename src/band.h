@@ -83,6 +83,9 @@ struct _BAND {
   double gain;                    // position of the RF gain slider
   int attenuation;                // position of the ATT slider
   int alexAttenuation;            // if ALEX: attenuator (0/1/2/3 for 0/10/20/30 dB)
+  int panlow;                     // panadapter settings
+  int panhigh;
+  int panstep;
 };
 
 //
@@ -120,8 +123,8 @@ extern BANDSTACK *bandstack_get_bandstack(int band);
 
 extern void radio_change_region(int region);
 
-extern void bandSaveState(void);
-extern void bandRestoreState(void);
+extern void band_save_state(void);
+extern void band_restore_state(void);
 
 char* getFrequencyInfo(long long frequency, int filter_low, int filter_high);
 int TransmitAllowed(void);

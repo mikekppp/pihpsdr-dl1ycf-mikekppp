@@ -40,12 +40,6 @@ static int myvfo;  //  VFO the menu is referring to
 static GtkWidget *dialog = NULL;
 static GtkWidget *label;
 
-//
-// Note that the decimal point is hard-wired to a point,
-// which may be incompatible with the LOCALE setting
-// such that atof() and friends do not understand it.
-// This is taken care of below
-//
 static char *btn_labels[] = {"1", "2", "3",
                              "4", "5", "6",
                              "7", "8", "9",
@@ -61,7 +55,7 @@ static int btn_actions[] = {1, 2, 3, 4, 5, 6, 7, 8, 9, -5, 0, -6, -2, -3, -4, -1
 
 static GtkWidget *btn[16];
 
-static void cleanup() {
+static void cleanup(void) {
   if (dialog != NULL) {
     GtkWidget *tmp = dialog;
     dialog = NULL;
@@ -73,7 +67,7 @@ static void cleanup() {
   }
 }
 
-static gboolean close_cb () {
+static gboolean close_cb(void) {
   cleanup();
   return TRUE;
 }
@@ -136,8 +130,8 @@ static void duplex_cb(GtkWidget *widget, gpointer data) {
     return;
   }
 
-  duplex = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
-  setDuplex();
+  int val = gtk_toggle_button_get_active(GTK_TOGGLE_BUTTON(widget));
+  radio_set_duplex(val);
 }
 
 static void ctun_cb(GtkWidget *widget, gpointer data) {
@@ -152,7 +146,7 @@ static void split_cb(GtkWidget *widget, gpointer data) {
   g_idle_add(ext_vfo_update, NULL);
 }
 
-static void set_btn_state() {
+static void set_btn_state(void) {
   int i;
 
   for (i = 0; i < 16; i++) {
@@ -304,8 +298,12 @@ void vfo_num_pad(int action, int id) {
 
   case -5:  // Decimal point
 
-    // if there is already a decimal point in the string,
+    //
+    // If there is already a decimal point in the string,
     // do not add another one
+    // The "locale" stuff is no longer needed (but does no harm)
+    // since we now force the "C" locale in the program.
+    //
     if (index(buffer, *(locale->decimal_point)) == NULL &&
         len <= sizeof(vfo[id].entered_frequency) - 2) {
       buffer[len++] = *(locale->decimal_point);

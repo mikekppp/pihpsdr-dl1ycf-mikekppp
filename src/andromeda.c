@@ -51,7 +51,7 @@ int andromeda_execute_button(int v, int p) {
     case 26:
     case 27:
     case 28:
-      schedule_action(toolbar_switches[p - 21].switch_function, (v == 0) ? PRESSED : RELEASED, 0);
+      schedule_action(tb_actions[tb_function[0]][p - 21], (v == 0) ? PRESSED : RELEASED, 0);
       break;
 
     case 46: // SDR On
@@ -192,7 +192,7 @@ int andromeda_execute_button(int v, int p) {
         vfo_id_band_changed(active_receiver->id ? VFO_B : VFO_A, band);
         shift = 0;
       } else if (!shift && v == 1) {
-        if (p == 30) { start_tx(); }                                  // MODE DATA
+        if (p == 30) { start_tx_menu(); }                             // MODE DATA
         else if (p == 31) { schedule_action(MODE_PLUS, PRESSED, 0); } // MODE+
         else if (p == 32) { schedule_action(FILTER_PLUS, PRESSED, 0); } // FILTER+
         else if (p == 33) { radio_change_receivers(receivers == 1 ? 2 : 1); } // RX2
@@ -287,7 +287,7 @@ int andromeda_execute_button(int v, int p) {
           }
         }
       } else if (v == 2) {
-        start_ps();
+        start_ps_menu();
         longpress = 1;
       }
 

@@ -46,16 +46,10 @@
 #include "receiver.h"
 #include "vfo.h"
 
-static PaStream *record_handle = NULL;
-
 int n_input_devices;
-AUDIO_DEVICE input_devices[MAX_AUDIO_DEVICES];
 int n_output_devices;
+AUDIO_DEVICE input_devices[MAX_AUDIO_DEVICES];
 AUDIO_DEVICE output_devices[MAX_AUDIO_DEVICES];
-
-GMutex audio_mutex;
-int n_input_devices = 0;
-int n_output_devices = 0;
 
 //
 // We now use callback functions to provide the "headphone" audio data,
@@ -63,18 +57,23 @@ int n_output_devices = 0;
 // RX audio samples are put into a ring buffer and "fetched" therefreom
 // by the portaudio "headphone" callback.
 //
-// We choose a ring buffer of 9600 (stereo) samples that is kept about half-full
-// during RX (latency: 0.1 sec) which should be more than enough.
-// If the buffer falls below 1800, half a buffer length of silence is
-// inserted. This usually only happens after TX/RX transitions
+// We choose a ring buffer of MY_RING_BUFFER_SIZE (stereo) samples that is kept
+// about half-full during RX (target latency: about 0.1 sec) which should be more
+// than enough.
+// If the buffer falls below MY_RING_LOW_WATER, "silence" is inserted until the
+// buffer is again half full. This usually only happens after TX/RX transitions
 //
-// If we go TX in CW mode, cw_audio_write() is called. If it is called for
-// the first time with a non-zero sidetone volume,
-// the ring buffer is cleared and only few (stereo) samples of silence
-// are put into it. This is probably the minimum amount necessary to avoid
+// During TX (no duplex), tx_audio_write() is called. If it is called for
+// the first time after a RX/TX transition, most of the pending contents in
+// the ring buffer is cleared and only CW_LAT_TARGET (stereo) samples
+// are kept. This is probably the minimum amount necessary to avoid
 // audio underruns which manifest themselves as ugly cracks in the side ton.
-// During the TX phase, the buffer filling is kept between two rather low
-// water marks to ensure the small CW sidetone latency is kept.
+// During the TX phase, each time 16 subsequent zero samples are detected,
+// one of these is deleted or an additional one inserted to keep the output
+// buffer filling at about CW_LAT_TARGET. This is (only)
+// important for the CW side tone and here we have "real silence" between the
+// dots/dashes. This keeps the CW sidetone latency near the target value.
+//
 // If we then go to RX again a "low water mark" condition is detected in the
 // first call to audio_write() and half a buffer length of silence is inserted
 // again.
@@ -84,43 +83,29 @@ int n_output_devices = 0;
 // One can go smaller but this increases the probabilities of audio cracks
 // from buffer underruns.
 //
-// Experiments indicate that we can indeed keep the ring buffer about half filling
-// during RX and quite empty during CW-TX.
-//
 //
 
 #define MY_AUDIO_BUFFER_SIZE  128
 #define MY_RING_BUFFER_SIZE  9600
 #define MY_RING_LOW_WATER     512
 #define MY_RING_HIGH_WATER   9000
-#define MY_CW_LOW_WATER       192
-#define MY_CW_HIGH_WATER      320
-
-//
-// Ring buffer for "local microphone" samples stored locally here.
-// NOTE: lead large buffer for some "loopback" devices which produce
-//       samples in large chunks if fed from digimode programs.
-//
-static          float  *mic_ring_buffer = NULL;
-static volatile int     mic_ring_outpt = 0;
-static volatile int     mic_ring_inpt = 0;
-
-static int cwmode = 0;  // used to detect TRX transitions in CW
+#define CW_LAT_LOW            224
+#define CW_LAT_TARGET         256
+#define CW_LAT_HIGH           288
 
 //
 // AUDIO_GET_CARDS
 //
 // This inits PortAudio and looks for suitable input and output channels
 //
-void audio_get_cards() {
+void audio_get_cards(void) {
   int numDevices;
   PaStreamParameters inputParameters, outputParameters;
   PaError err;
-  g_mutex_init(&audio_mutex);
   err = Pa_Initialize();
 
   if ( err != paNoError ) {
-    t_print("%s: init error %s\n", __FUNCTION__, Pa_GetErrorText(err));
+    t_print("%s: init error %s\n", __func__, Pa_GetErrorText(err));
     return;
   }
 
@@ -152,7 +137,7 @@ void audio_get_cards() {
         n_input_devices++;
       }
 
-      t_print("%s: INPUT DEVICE, No=%d, Name=%s\n", __FUNCTION__, i, deviceInfo->name);
+      t_print("%s: INPUT DEVICE, No=%d, Name=%s\n", __func__, i, deviceInfo->name);
     }
 
     outputParameters.device = i;
@@ -169,7 +154,7 @@ void audio_get_cards() {
         n_output_devices++;
       }
 
-      t_print("%s: OUTPUT DEVICE, No=%d, Name=%s\n", __FUNCTION__, i, deviceInfo->name);
+      t_print("%s: OUTPUT DEVICE, No=%d, Name=%s\n", __func__, i, deviceInfo->name);
     }
   }
 }
@@ -177,45 +162,40 @@ void audio_get_cards() {
 //
 // AUDIO_OPEN_INPUT
 //
-// open a PA stream that connects to the TX microphone
+// open a PA stream that connects to the TX audio input
 // The PA callback function then sends the data to the transmitter
 //
 
-static int pa_mic_cb(const void*, void*, unsigned long, const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void*);
+static int pa_in_cb(const void*, void*, unsigned long, const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void*);
 static int pa_out_cb(const void*, void*, unsigned long, const PaStreamCallbackTimeInfo*, PaStreamCallbackFlags, void*);
 
-int audio_open_input() {
+int audio_open_input(TRANSMITTER *tx) {
   PaError err;
   PaStreamParameters inputParameters;
   int i;
   int padev;
-
-  if (!can_transmit) {
-    return -1;
-  }
-
   //
   // Look up device name and determine device ID
   //
   padev = -1;
 
   for (i = 0; i < n_input_devices; i++) {
-    if (!strcmp(transmitter->microphone_name, input_devices[i].name)) {
+    if (!strcmp(tx->audio_name, input_devices[i].name)) {
+      t_print("%s TX:%s\n", __func__, input_devices[i].description);
       padev = input_devices[i].index;
       break;
     }
   }
 
-  t_print("%s: name=%s PADEV=%d\n", __FUNCTION__, transmitter->microphone_name, padev);
-
   //
-  // Device name possibly came from props file and device is no longer there
+  // Device name not registered upon startup
   //
   if (padev < 0) {
+    t_print("%s: not registered: %s\n", __func__, tx->audio_name);
     return -1;
   }
 
-  g_mutex_lock(&audio_mutex);
+  g_mutex_lock(&tx->audio_mutex);
   bzero(&inputParameters, sizeof(inputParameters)); //not necessary if you are filling in all the fields
   inputParameters.channelCount = 1;   // MONO
   inputParameters.device = padev;
@@ -223,43 +203,43 @@ int audio_open_input() {
   inputParameters.sampleFormat = paFloat32;
   inputParameters.suggestedLatency = Pa_GetDeviceInfo(padev)->defaultLowInputLatency ;
   inputParameters.hostApiSpecificStreamInfo = NULL; //See you specific host's API docs for info on using this field
-  err = Pa_OpenStream(&record_handle, &inputParameters, NULL, 48000.0, MY_AUDIO_BUFFER_SIZE,
-                      paNoFlag, pa_mic_cb, NULL);
+  err = Pa_OpenStream(&tx->audio_handle, &inputParameters, NULL, 48000.0, MY_AUDIO_BUFFER_SIZE,
+                      paNoFlag, pa_in_cb, tx);
 
   if (err != paNoError) {
-    t_print("%s: open stream error %s\n", __FUNCTION__, Pa_GetErrorText(err));
-    record_handle = NULL;
-    g_mutex_unlock(&audio_mutex);
+    t_print("%s: open stream error %s\n", __func__, Pa_GetErrorText(err));
+    tx->audio_handle = NULL;
+    g_mutex_unlock(&tx->audio_mutex);
     return -1;
   }
 
-  mic_ring_buffer = (float *) g_new(float, MY_RING_BUFFER_SIZE);
-  mic_ring_outpt = mic_ring_inpt = 0;
+  tx->audio_buffer = g_new(double, MY_RING_BUFFER_SIZE);
+  tx->audio_buffer_outpt = tx->audio_buffer_inpt = 0;
 
-  if (mic_ring_buffer == NULL) {
-    Pa_CloseStream(record_handle);
-    record_handle = NULL;
-    t_print("%s: alloc buffer failed.\n", __FUNCTION__);
-    g_mutex_unlock(&audio_mutex);
+  if (tx->audio_buffer == NULL) {
+    Pa_CloseStream(tx->audio_handle);
+    tx->audio_handle = NULL;
+    t_print("%s: alloc buffer failed.\n", __func__);
+    g_mutex_unlock(&tx->audio_mutex);
     return -1;
   }
 
-  err = Pa_StartStream(record_handle);
+  err = Pa_StartStream(tx->audio_handle);
 
   if (err != paNoError) {
-    t_print("%s: start stream error %s\n", __FUNCTION__, Pa_GetErrorText(err));
-    Pa_CloseStream(record_handle);
-    record_handle = NULL;
-    g_free(mic_ring_buffer);
-    mic_ring_buffer = NULL;
-    g_mutex_unlock(&audio_mutex);
+    t_print("%s: start stream error %s\n", __func__, Pa_GetErrorText(err));
+    Pa_CloseStream(tx->audio_handle);
+    tx->audio_handle = NULL;
+    g_free(tx->audio_buffer);
+    tx->audio_buffer = NULL;
+    g_mutex_unlock(&tx->audio_mutex);
     return -1;
   }
 
   //
   // Finished!
   //
-  g_mutex_unlock(&audio_mutex);
+  g_mutex_unlock(&tx->audio_mutex);
   return 0;
 }
 
@@ -270,57 +250,60 @@ static int pa_out_cb(const void *inputBuffer, void *outputBuffer, unsigned long 
                      const PaStreamCallbackTimeInfo* timeInfo,
                      PaStreamCallbackFlags statusFlags,
                      void *userdata) {
+  // Assume paFloat32 is represented as "float" in C
   float *out = (float *)outputBuffer;
   RECEIVER *rx = (RECEIVER *)userdata;
 
   if (out == NULL) {
-    t_print("%s: bogus audio buffer in callback\n", __FUNCTION__);
+    t_print("%s: bogus audio buffer in callback\n", __func__);
     return paContinue;
   }
 
-  g_mutex_lock(&rx->local_audio_mutex);
+  g_mutex_lock(&rx->audio_mutex);
 
-  if (rx->local_audio_buffer != NULL) {
+  if (rx->audio_buffer != NULL) {
     //
     // Mutex protection: if the buffer is non-NULL it cannot vanish
     // util callback is completed
     //
-    int newpt = rx->local_audio_buffer_outpt;
+    int newpt = rx->audio_buffer_outpt;
 
     for (unsigned int i = 0; i < framesPerBuffer; i++) {
-      if (rx->local_audio_buffer_inpt == newpt) {
+      if (rx->audio_buffer_inpt == newpt) {
         // Ring buffer empty, send zero sample
         *out++ = 0.0;
         *out++ = 0.0;
       } else {
-        *out++ = rx->local_audio_buffer[2 * newpt];
-        *out++ = rx->local_audio_buffer[2 * newpt + 1];
+        *out++ = (float) rx->audio_buffer[2 * newpt];
+        *out++ = (float) rx->audio_buffer[2 * newpt + 1];
         newpt++;
 
         if (newpt >= MY_RING_BUFFER_SIZE) { newpt = 0; }
 
         MEMORY_BARRIER;
-        rx->local_audio_buffer_outpt = newpt;
+        rx->audio_buffer_outpt = newpt;
       }
     }
   }
 
-  g_mutex_unlock(&rx->local_audio_mutex);
+  g_mutex_unlock(&rx->audio_mutex);
   return paContinue;
 }
 
 //
 // PortAudio call-back function for Audio input
 //
-static int pa_mic_cb(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
-                     const PaStreamCallbackTimeInfo* timeInfo,
-                     PaStreamCallbackFlags statusFlags,
-                     void *userdata) {
+static int pa_in_cb(const void *inputBuffer, void *outputBuffer, unsigned long framesPerBuffer,
+                    const PaStreamCallbackTimeInfo* timeInfo,
+                    PaStreamCallbackFlags statusFlags,
+                    void *userdata) {
+  // Assume paFloat32 is represented as "float" in C
   const float *in = (float *)inputBuffer;
+  TRANSMITTER *tx = (TRANSMITTER *)userdata;
 
   if (in == NULL) {
     // This should not happen, so we do not send silence etc.
-    t_print("%s: bogus audio buffer in callback\n", __FUNCTION__);
+    t_print("%s: bogus audio buffer in callback\n", __func__);
     return paContinue;
   }
 
@@ -330,23 +313,20 @@ static int pa_mic_cb(const void *inputBuffer, void *outputBuffer, unsigned long 
   //
   if (radio_is_remote) {
     for (unsigned int i = 0; i < framesPerBuffer; i++) {
-      short sample = in[i] * 32768.0;
-      server_tx_audio(sample);
+      server_tx_audio((double) in[i]);
     }
 
     return paContinue;
   }
 
-  g_mutex_lock(&audio_mutex);
+  g_mutex_lock(&tx->audio_mutex);
 
-  if (mic_ring_buffer != NULL) {
-    static int last_was_tx = 0;
-
+  if (tx->audio_buffer != NULL) {
     //
     // mutex protected: ring buffer cannot vanish
     //
     // Normally there is a slight mis-match between the 48kHz sample
-    // rate of the "microphone device" and the 48kHz rate of the
+    // rate of the audio input device and the 48kHz rate of the
     // HPSDR device. Thus, the mic buffer tends to either slowly
     // drain or slowly become full (which leads to large TX delays).
     //
@@ -356,45 +336,40 @@ static int pa_mic_cb(const void *inputBuffer, void *outputBuffer, unsigned long 
     // RX operation, one cannot fiddle around with the mic samples since
     // VOX might be active.
     //
-    // The (static) variable last_was_tx is used to "detect" the
-    // TX/RX transition.
+    // tx->audio_flag is used to "detect" the TX/RX transition.
     //
     //
     if (!radio_is_transmitting()) {
-      if (last_was_tx) {
-        last_was_tx = 0;
-        mic_ring_outpt = 0;
-        mic_ring_inpt  = 960;
-        bzero(mic_ring_buffer, 960 * sizeof(float));
+      if (tx->audio_flag) {
+        tx->audio_flag = 0;
+        tx->audio_buffer_outpt = 0;
+        tx->audio_buffer_inpt  = 960;
+        bzero(tx->audio_buffer, 960 * sizeof(double));
       }
     } else {
-      last_was_tx = 1;
+      tx->audio_flag = 1;
     }
 
     for (unsigned int i = 0; i < framesPerBuffer; i++) {
       //
       // put sample into ring buffer
       //
-      int newpt = mic_ring_inpt + 1;
+      int newpt = tx->audio_buffer_inpt + 1;
 
       if (newpt == MY_RING_BUFFER_SIZE) { newpt = 0; }
 
-      if (newpt != mic_ring_outpt) {
+      if (newpt != tx->audio_buffer_outpt) {
         MEMORY_BARRIER;
         // buffer space available, do the write
-        mic_ring_buffer[mic_ring_inpt] = in[i];
+        tx->audio_buffer[tx->audio_buffer_inpt] = in[i];
         MEMORY_BARRIER;
-        // atomic update of mic_ring_inpt
-        mic_ring_inpt = newpt;
+        // atomic update of tx->audio_buffer_inpt
+        tx->audio_buffer_inpt = newpt;
       }
     }
   }
 
-  // print mic input buffer water mark for debugging
-  // i=mic_ring_inpt - mic_ring_outpt;
-  // if (mic_ring_inpt < mic_ring_outpt) i +=MY_RING_BUFFER_SIZE;
-  // t_print("MIC IN BUF=%d\n", i);
-  g_mutex_unlock(&audio_mutex);
+  g_mutex_unlock(&tx->audio_mutex);
   return paContinue;
 }
 
@@ -402,30 +377,30 @@ static int pa_mic_cb(const void *inputBuffer, void *outputBuffer, unsigned long 
 // Utility function for retrieving mic samples
 // from ring buffer
 //
-float audio_get_next_mic_sample() {
-  float sample;
-  g_mutex_lock(&audio_mutex);
+double audio_get_next_mic_sample(TRANSMITTER *tx) {
+  double sample;
+  g_mutex_lock(&tx->audio_mutex);
 
   //
   // mutex protected (for every single sample!):
   // ring buffer cannot vanish while being processed here
   //
-  if ((mic_ring_buffer == NULL) || (mic_ring_outpt == mic_ring_inpt)) {
+  if ((tx->audio_buffer == NULL) || (tx->audio_buffer_outpt == tx->audio_buffer_inpt)) {
     // no buffer, or nothing in buffer: insert silence
     sample = 0.0;
   } else {
-    int newpt = mic_ring_outpt + 1;
+    int newpt = tx->audio_buffer_outpt + 1;
 
     if (newpt == MY_RING_BUFFER_SIZE) { newpt = 0; }
 
     MEMORY_BARRIER;
-    sample = mic_ring_buffer[mic_ring_outpt];
+    sample = tx->audio_buffer[tx->audio_buffer_outpt];
     // atomic update of read pointer
     MEMORY_BARRIER;
-    mic_ring_outpt = newpt;
+    tx->audio_buffer_outpt = newpt;
   }
 
-  g_mutex_unlock(&audio_mutex);
+  g_mutex_unlock(&tx->audio_mutex);
   return sample;
 }
 
@@ -446,21 +421,21 @@ int audio_open_output(RECEIVER *rx) {
 
   for (i = 0; i < n_output_devices; i++) {
     if (!strcmp(rx->audio_name, output_devices[i].name)) {
+      t_print("%s RX%d:%s\n", __func__, rx->id + 1, output_devices[i].description);
       padev = output_devices[i].index;
       break;
     }
   }
 
-  t_print("%s: name=%s PADEV=%d\n", __FUNCTION__, rx->audio_name, padev);
-
   //
-  // Device name possibly came from props file and device is no longer there
+  // Device name not registered upon startup
   //
   if (padev < 0) {
+    t_print("%s: not registered: %s\n", __func__, rx->audio_name);
     return -1;
   }
 
-  g_mutex_lock(&rx->local_audio_mutex);
+  g_mutex_lock(&rx->audio_mutex);
   bzero(&outputParameters, sizeof(outputParameters)); //not necessary if you are filling in all the fields
   outputParameters.channelCount = 2;   // audio output is stereo
   outputParameters.device = padev;
@@ -469,80 +444,83 @@ int audio_open_output(RECEIVER *rx) {
   // use a zero for the latency to get the minimum value
   outputParameters.suggestedLatency = 0.0; //Pa_GetDeviceInfo(padev)->defaultLowOutputLatency ;
   outputParameters.hostApiSpecificStreamInfo = NULL; //See you specific host's API docs for info on using this field
-  err = Pa_OpenStream(&(rx->playstream), NULL, &outputParameters, 48000.0, MY_AUDIO_BUFFER_SIZE,
+  err = Pa_OpenStream(&(rx->audio_handle), NULL, &outputParameters, 48000.0, MY_AUDIO_BUFFER_SIZE,
                       paNoFlag, pa_out_cb, rx);
 
   if (err != paNoError) {
-    t_print("%s: open stream error %s\n", __FUNCTION__, Pa_GetErrorText(err));
-    rx->playstream = NULL;
-    g_mutex_unlock(&rx->local_audio_mutex);
+    t_print("%s: open stream error %s\n", __func__, Pa_GetErrorText(err));
+    rx->audio_handle = NULL;
+    g_mutex_unlock(&rx->audio_mutex);
     return -1;
   }
 
   //
   // This is now a ring buffer much larger than a single audio buffer
   //
-  rx->local_audio_buffer = g_new(float, 2 * MY_RING_BUFFER_SIZE);
-  rx->local_audio_buffer_inpt = 0;
-  rx->local_audio_buffer_outpt = 0;
+  rx->audio_buffer = g_new(double, 2 * MY_RING_BUFFER_SIZE);
+  rx->audio_buffer_inpt = 0;
+  rx->audio_buffer_outpt = 0;
 
-  if (rx->local_audio_buffer == NULL) {
-    t_print("%s: allocate buffer failed\n", __FUNCTION__);
-    Pa_CloseStream(rx->playstream);
-    rx->playstream = NULL;
-    g_mutex_unlock(&rx->local_audio_mutex);
+  if (rx->audio_buffer == NULL) {
+    t_print("%s: allocate buffer failed\n", __func__);
+    Pa_CloseStream(rx->audio_handle);
+    rx->audio_handle = NULL;
+    g_mutex_unlock(&rx->audio_mutex);
     return -1;
   }
 
-  err = Pa_StartStream(rx->playstream);
+  err = Pa_StartStream(rx->audio_handle);
 
   if (err != paNoError) {
-    t_print("%s: error starting stream:%s\n", __FUNCTION__, Pa_GetErrorText(err));
-    Pa_CloseStream(rx->playstream);
-    rx->playstream = NULL;
-    g_free(rx->local_audio_buffer);
-    rx->local_audio_buffer = NULL;
-    g_mutex_unlock(&rx->local_audio_mutex);
+    t_print("%s: error starting stream:%s\n", __func__, Pa_GetErrorText(err));
+    Pa_CloseStream(rx->audio_handle);
+    rx->audio_handle = NULL;
+    g_free(rx->audio_buffer);
+    rx->audio_buffer = NULL;
+    g_mutex_unlock(&rx->audio_mutex);
     return -1;
   }
 
+  rx->cwaudio = 0;
+  rx->cwcount = 0;
   //
   // Finished!
   //
-  g_mutex_unlock(&rx->local_audio_mutex);
+  g_mutex_unlock(&rx->audio_mutex);
   return 0;
 }
 
 //
 // AUDIO_CLOSE_INPUT
 //
-// close a TX microphone stream
+// close a TX audio stream
 //
-void audio_close_input() {
-  t_print("%s: micname=%s\n", __FUNCTION__, transmitter->microphone_name);
-  g_mutex_lock(&audio_mutex);
+void audio_close_input(TRANSMITTER *tx) {
+  t_print("%s: TX:%s\n", __func__, tx->audio_name);
+  g_mutex_lock(&tx->audio_mutex);
 
-  if (record_handle != NULL) {
-    PaError err = Pa_StopStream(record_handle);
-
-    if (err != paNoError) {
-      t_print("%s: error stopping stream: %s\n", __FUNCTION__, Pa_GetErrorText(err));
-    }
-
-    err = Pa_CloseStream(record_handle);
+  if (tx->audio_handle != NULL) {
+    PaError err = Pa_StopStream(tx->audio_handle);
 
     if (err != paNoError) {
-      t_print("%s: %s\n", __FUNCTION__, Pa_GetErrorText(err));
+      t_print("%s: error stopping stream: %s\n", __func__, Pa_GetErrorText(err));
     }
 
-    record_handle = NULL;
+    err = Pa_CloseStream(tx->audio_handle);
+
+    if (err != paNoError) {
+      t_print("%s: %s\n", __func__, Pa_GetErrorText(err));
+    }
+
+    tx->audio_handle = NULL;
   }
 
-  if (mic_ring_buffer != NULL) {
-    g_free(mic_ring_buffer);
+  if (tx->audio_buffer != NULL) {
+    g_free(tx->audio_buffer);
+    tx->audio_buffer = NULL;
   }
 
-  g_mutex_unlock(&audio_mutex);
+  g_mutex_unlock(&tx->audio_mutex);
 }
 
 //
@@ -551,31 +529,31 @@ void audio_close_input() {
 // shut down the stream connected with audio from one of the RX
 //
 void audio_close_output(RECEIVER *rx) {
-  t_print("%s: device=%s\n", __FUNCTION__, rx->audio_name);
-  g_mutex_lock(&rx->local_audio_mutex);
+  t_print("%s: RX%d:%s\n", __func__, rx->id + 1, rx->audio_name);
+  g_mutex_lock(&rx->audio_mutex);
 
-  if (rx->local_audio_buffer != NULL) {
-    g_free(rx->local_audio_buffer);
-    rx->local_audio_buffer = NULL;
+  if (rx->audio_buffer != NULL) {
+    g_free(rx->audio_buffer);
+    rx->audio_buffer = NULL;
   }
 
-  if (rx->playstream != NULL) {
-    PaError err = Pa_StopStream(rx->playstream);
+  if (rx->audio_handle != NULL) {
+    PaError err = Pa_StopStream(rx->audio_handle);
 
     if (err != paNoError) {
-      t_print("%s: stop stream error %s\n", __FUNCTION__, Pa_GetErrorText(err));
+      t_print("%s: stop stream error %s\n", __func__, Pa_GetErrorText(err));
     }
 
-    err = Pa_CloseStream(rx->playstream);
+    err = Pa_CloseStream(rx->audio_handle);
 
     if (err != paNoError) {
-      t_print("%s: close stream error %s\n", __FUNCTION__, Pa_GetErrorText(err));
+      t_print("%s: close stream error %s\n", __func__, Pa_GetErrorText(err));
     }
 
-    rx->playstream = NULL;
+    rx->audio_handle = NULL;
   }
 
-  g_mutex_unlock(&rx->local_audio_mutex);
+  g_mutex_unlock(&rx->audio_mutex);
 }
 
 //
@@ -587,30 +565,24 @@ void audio_close_output(RECEIVER *rx) {
 //
 // Note that the check on radio_is_transmitting() takes care that "blocking"
 // by the mutex can only occur in the moment of a RX/TX transition if
-// both audio_write() and cw_audio_write() get a "go".
+// both audio_write() and tx_audio_write() get a "go".
 //
 // So mutex locking/unlocking should only cost few CPU cycles in
 // normal operation.
 //
-int audio_write (RECEIVER *rx, float left, float right) {
-  int txmode = vfo_get_tx_mode();
-  float *buffer = rx->local_audio_buffer;
+void audio_write (RECEIVER *rx, double left, double right) {
+  double *buffer = rx->audio_buffer;
 
   //
-  // If a CW/TUNE side tone may occur, quickly return
+  // If transmitting without duplex, quickly return
   //
-  if (rx == active_receiver && radio_is_transmitting()) {
-    // radio_is_transmitting() ensures we have a transmitter
-    if (txmode == modeCWU || txmode == modeCWL) { return 0; }
+  if (rx == active_receiver && radio_is_transmitting() && !duplex) { return; }
 
-    if (transmitter->tune && transmitter->swrtune) { return 0; }
-  }
+  g_mutex_lock(&rx->audio_mutex);
+  rx->cwaudio = 0;
 
-  g_mutex_lock(&rx->local_audio_mutex);
-  cwmode = 0;
-
-  if (rx->playstream != NULL && buffer != NULL) {
-    int avail = rx->local_audio_buffer_inpt - rx->local_audio_buffer_outpt;
+  if (rx->audio_handle != NULL && buffer != NULL) {
+    int avail = rx->audio_buffer_inpt - rx->audio_buffer_outpt;
 
     if (avail < 0) { avail += MY_RING_BUFFER_SIZE; }
 
@@ -623,13 +595,13 @@ int audio_write (RECEIVER *rx, float left, float right) {
       //
       // This is not always an "error" to be reported and necessarily happens in three cases:
       //  a) we come here for the first time
-      //  b) we come from a TX/RX transition in non-CW mode, and no duplex
-      //  c) we come from a TX/RX transition in CW mode
+      //  b) we come from a TX/RX transition without having a side tone
+      //  c) we come from a TX/RX transition with a side tone or a TX monitor
       //
       // In case a) and b) the buffer will be empty, in c) the buffer will contain "few" samples
-      // because of the "CW audio low latency" strategy.
+      // (about CW_LAT_TARGET)
       //
-      int oldpt = rx->local_audio_buffer_inpt;
+      int oldpt = rx->audio_buffer_inpt;
 
       for (int i = 0; i < MY_RING_BUFFER_SIZE / 2 - avail; i++) {
         buffer[2 * oldpt] = 0.0;
@@ -640,8 +612,8 @@ int audio_write (RECEIVER *rx, float left, float right) {
       }
 
       MEMORY_BARRIER;
-      rx->local_audio_buffer_inpt = oldpt;
-      //t_print("%s: buffer was nearly empty, inserted silence.\n", __FUNCTION__);
+      rx->audio_buffer_inpt = oldpt;
+      //t_print("%s: buffer was nearly empty, inserted silence.\n", __func__);
     }
 
     if (avail > MY_RING_HIGH_WATER) {
@@ -653,23 +625,23 @@ int audio_write (RECEIVER *rx, float left, float right) {
       // deleting half a buffer size of audio, such that the next overrun is in the distant
       // future.
       //
-      int oldpt = rx->local_audio_buffer_inpt - avail + MY_RING_BUFFER_SIZE / 2;
+      int oldpt = rx->audio_buffer_inpt - avail + MY_RING_BUFFER_SIZE / 2;
 
       if (oldpt < 0) { oldpt += MY_RING_BUFFER_SIZE; }
 
-      rx->local_audio_buffer_inpt = oldpt;
-      t_print("%s: buffer was nearly full, deleted audio\n", __FUNCTION__);
+      rx->audio_buffer_inpt = oldpt;
+      //t_print("%s: buffer was nearly full, deleted audio\n", __func__);
     }
 
     //
     // put sample into ring buffer
     //
-    int oldpt = rx->local_audio_buffer_inpt;
+    int oldpt = rx->audio_buffer_inpt;
     int newpt = oldpt + 1;
 
     if (newpt == MY_RING_BUFFER_SIZE) { newpt = 0; }
 
-    if (newpt != rx->local_audio_buffer_outpt) {
+    if (newpt != rx->audio_buffer_outpt) {
       //
       // buffer space available
       //
@@ -677,61 +649,72 @@ int audio_write (RECEIVER *rx, float left, float right) {
       buffer[2 * oldpt] = left;
       buffer[2 * oldpt + 1] = right;
       MEMORY_BARRIER;
-      rx->local_audio_buffer_inpt = newpt;
+      rx->audio_buffer_inpt = newpt;
     }
   }
 
-  g_mutex_unlock(&rx->local_audio_mutex);
-  return 0;
+  g_mutex_unlock(&rx->audio_mutex);
+  return;
 }
 
 //
-// During CW, between the elements the side tone contains "true" silence.
+// Since the main use of tx_audio_write() is to produce a CW side tone,
+// do active latency (buffer filling) management:
+// During CW, between the elements the side tone contain "true" silence.
 // We detect a sequence of 16 subsequent zero samples, and insert or delete
-// a zero sample depending on the buffer water mark:
-// If there are more than two portaudio buffers available, delete one sample,
-// if it drops down to less than one portaudio buffer, insert one sample
+// a zero sample to keep the buffer filling at CW_LAT_TARGET.
 //
-// Thus we have an active latency management.
-//
-int cw_audio_write(RECEIVER *rx, float sample) {
-  g_mutex_lock(&rx->local_audio_mutex);
+void tx_audio_write(RECEIVER *rx, double sample) {
+  g_mutex_lock(&rx->audio_mutex);
 
-  if (rx->playstream != NULL && rx->local_audio_buffer != NULL) {
-    static int count = 0;
+  if (rx->audio_handle != NULL && rx->audio_buffer != NULL) {
     int oldpt, newpt;
-    int avail = rx->local_audio_buffer_inpt - rx->local_audio_buffer_outpt;
+    int avail = rx->audio_buffer_inpt - rx->audio_buffer_outpt;
     int adjust = 0;
 
     if (avail < 0) { avail += MY_RING_BUFFER_SIZE; }
 
-    if (cwmode == 0) {
+    if (rx->cwaudio == 0) {
       //
       // First time producing CW audio after RX/TX transition:
-      // discard audio buffer and insert *a little bit of* silence
-      // (currently, 128 samples = 2.6 msec)
+      // keep the oldest samples (until CW_LAT_TARGET) in the audio buffer
+      // and discard the rest. Apply a down-slew on the samples
+      // kept.
       //
-      bzero(rx->local_audio_buffer, 2 * MY_CW_LOW_WATER * sizeof(float));
+      double damp = 1.000;
+      newpt = rx->audio_buffer_outpt;
+      for (int i = 0; i < CW_LAT_TARGET; i++) {
+        if (i >= avail) {
+          rx->audio_buffer[2 * newpt] = 0.0;
+          rx->audio_buffer[2 * newpt + 1] = 0.0;
+        } else {
+          rx->audio_buffer[2 * newpt] *= damp;
+          rx->audio_buffer[2 * newpt + 1] *= damp;
+          damp = damp * 0.975;
+        }
+        newpt++;
+
+        MEMORY_BARRIER;
+        if (newpt >= MY_RING_BUFFER_SIZE) { newpt = 0; }
+      }
+      rx->audio_buffer_inpt = newpt;
       MEMORY_BARRIER;
-      rx->local_audio_buffer_inpt = MY_CW_LOW_WATER;
-      MEMORY_BARRIER;
-      rx->local_audio_buffer_outpt = 0;
-      avail = MY_CW_LOW_WATER;
-      count = 0;
-      cwmode = 1;
+      avail = CW_LAT_TARGET;
+      rx->cwcount = 0;
+      rx->cwaudio = 1;
     }
 
-    if (sample != 0.0) { count = 0; }
+    if (sample != 0.0) { rx->cwcount = 0; }
 
-    if (++count >= 16) {
-      count = 0;
+    if (++rx->cwcount >= 16) {
+      rx->cwcount = 0;
 
       //
       // We arrive here if we have seen 16 zero samples in a row.
       //
-      if (avail > MY_CW_HIGH_WATER) { adjust = 2; } // full: we are above high water mark
+      if (avail > CW_LAT_HIGH) { adjust = 2; } // full: we are above high water mark
 
-      if (avail < MY_CW_LOW_WATER ) { adjust = 1; } // low: we are below low water mark
+      if (avail < CW_LAT_LOW)  { adjust = 1; } // low: we are below low water mark
     }
 
     switch (adjust) {
@@ -743,20 +726,20 @@ int cw_audio_write(RECEIVER *rx, float sample) {
       //               both the left and right channel with the
       //               same phase.
       //
-      oldpt = rx->local_audio_buffer_inpt;
+      oldpt = rx->audio_buffer_inpt;
       newpt = oldpt + 1;
 
-      if (newpt == MY_RING_BUFFER_SIZE) { newpt = 0; }
+      if (newpt >= MY_RING_BUFFER_SIZE) { newpt = 0; }
 
-      if (newpt != rx->local_audio_buffer_outpt) {
+      if (newpt != rx->audio_buffer_outpt) {
         //
         // buffer space available
         //
         MEMORY_BARRIER;
-        rx->local_audio_buffer[2 * oldpt] = sample;
-        rx->local_audio_buffer[2 * oldpt + 1] = sample;
+        rx->audio_buffer[2 * oldpt] = sample;
+        rx->audio_buffer[2 * oldpt + 1] = sample;
         MEMORY_BARRIER;
-        rx->local_audio_buffer_inpt = newpt;
+        rx->audio_buffer_inpt = newpt;
       }
 
       break;
@@ -766,21 +749,21 @@ int cw_audio_write(RECEIVER *rx, float sample) {
       // we just saw 16 samples of silence and buffer filling is low:
       // insert one extra silence sample
       //
-      oldpt = rx->local_audio_buffer_inpt;
-      rx->local_audio_buffer[2 * oldpt] = 0.0;
-      rx->local_audio_buffer[2 * oldpt + 1] = 0.0;
+      oldpt = rx->audio_buffer_inpt;
+      rx->audio_buffer[2 * oldpt] = 0.0;
+      rx->audio_buffer[2 * oldpt + 1] = 0.0;
       oldpt++;
 
-      if (oldpt == MY_RING_BUFFER_SIZE) { oldpt = 0; }
+      if (oldpt >= MY_RING_BUFFER_SIZE) { oldpt = 0; }
 
-      rx->local_audio_buffer[2 * oldpt] = 0.0;
-      rx->local_audio_buffer[2 * oldpt + 1] = 0.0;
+      rx->audio_buffer[2 * oldpt] = 0.0;
+      rx->audio_buffer[2 * oldpt + 1] = 0.0;
       oldpt++;
 
-      if (oldpt == MY_RING_BUFFER_SIZE) { oldpt = 0; }
+      if (oldpt >= MY_RING_BUFFER_SIZE) { oldpt = 0; }
 
       MEMORY_BARRIER;
-      rx->local_audio_buffer_inpt = oldpt;
+      rx->audio_buffer_inpt = oldpt;
       break;
 
     case 2:
@@ -792,8 +775,8 @@ int cw_audio_write(RECEIVER *rx, float sample) {
     }
   }
 
-  g_mutex_unlock(&rx->local_audio_mutex);
-  return 0;
+  g_mutex_unlock(&rx->audio_mutex);
+  return;
 }
 
 #endif

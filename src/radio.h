@@ -73,8 +73,10 @@ enum _capture_state {
   CAP_RECORDING,           // audio is being recorded
   CAP_RECORD_DONE,         // record buffer full
   CAP_AVAIL,               // audio recording finished
-  CAP_REPLAY,              // audio is being re-played
-  CAP_REPLAY_DONE,         // all audio has been sent
+  CAP_XMIT,                // captured audio is being transmitted
+  CAP_XMIT_DONE,           // captured audio data transmission ended
+  CAP_REPLAY,              // captured audio is replayed locally
+  CAP_REPLAY_DONE,         // captured audio replay ended
   CAP_GOTOSLEEP,           // hide capture state display
   CAP_SLEEPING             // capture state is hidden
 };
@@ -99,8 +101,17 @@ enum _display_enum {
   AVG_TIMEWINDOW
 };
 
-extern long long frequency_calibration;
+// RX and TX frequency calibration (relative, in Hz per 10 MHz)
+extern int frequency_calibration;
 extern int region;
+
+static inline long long calibrated_frequency(long long f) {
+  //
+  // Assuming long long is 64 bit and can hold number up to 2^63,
+  // the following does not overflow for frequencies up to 750 GHz.
+  //
+  return (f * (10000000LL + frequency_calibration)) / 10000000LL;
+}
 
 extern int RECEIVERS;
 extern int PS_TX_FEEDBACK;
@@ -147,17 +158,16 @@ extern int pa_power;
 extern double pa_trim[11];
 extern const int pa_power_list[];
 
-extern int display_zoompan;
-extern int display_sliders;
-extern int display_toolbar;
+extern int slider_rows;
+extern int toolbar_rows;
 
 extern int mic_linein;
 extern double linein_gain;
 extern int mic_boost;
-extern int mic_bias_enabled;
-extern int mic_ptt_enabled;
-extern int mic_ptt_tip_bias_ring;
-extern int mic_input_xlr;
+extern int orion_mic_bias_enabled;
+extern int orion_mic_ptt_enabled;
+extern int orion_mic_ptt_tip;
+extern int g2_mic_input_xlr;
 
 extern int receivers;
 
@@ -195,12 +205,8 @@ extern int vfo_snap;
 extern int protocol;
 extern int device;
 extern int new_pa_board;
-extern int ozy_software_version;
-extern int mercury_software_version[2];
-extern int penelope_software_version;
 extern int ptt;
 extern int mox;
-extern int pre_mox;
 extern int memory_tune;
 extern int full_tune;
 
@@ -230,7 +236,7 @@ extern double vox_hang;
 extern int vox;
 extern int CAT_cw_is_active;
 extern int MIDI_cw_is_active;
-extern int radio_ptt;
+extern int hpsdr_ptt;
 extern int cw_key_hit;
 extern int n_adc;
 
@@ -246,26 +252,30 @@ extern double *capture_data;
 
 extern int can_transmit;
 
-extern int have_rx_gain;         // programmable RX gain available
-extern int have_rx_att;          // step attenuator available -31 ... 0 dB
-extern int have_preamp;          // switchable preamp
-extern int have_dither;          // Dither bit can be used
-extern int have_alex_att;        // ALEX board does have 0/10/20/30 dB attenuator
-extern int have_saturn_xdma;     // Saturn can use Network or XDMA interface
-extern int have_lime;            // The radio is a LIME-SDR
-extern int have_radioberry1;     // RadioBerry with first-generation  firmware
-extern int have_radioberry2;     // RadioBerry with second-generation firmware
-extern int rx_gain_calibration;  // used to calibrate the input signal
+extern int have_rx_gain;               // programmable RX gain available
+extern int have_rx_att;                // step attenuator available -31 ... 0 dB
+extern int have_preamp;                // switchable preamp
+extern int have_dither;                // Dither bit can be used
+extern int have_alex_att;              // ALEX board does have 0/10/20/30 dB attenuator
+extern int have_saturn_xdma;           // Running inside a G2 *and* using XDMA interface
+extern int have_g2v1;                  // Running inside a G2V1
+extern int have_g2v2;                  // Running inside a G2V2
+extern int have_lime;                  // The radio is a LIME-SDR
+extern int have_radioberry1;           // RadioBerry with first-generation  firmware
+extern int have_radioberry2;           // RadioBerry with second-generation firmware
+extern int have_radioberry3;           // RadioBerry with third-generation firmware (pio support)
+extern int rx_gain_calibration;        // used to calibrate the input signal
 
-extern double drive_min;         // minimum value of the drive slider
-extern double drive_max;         // maximum value of the drive slider
-extern double drive_digi_max;    // maximum value allowed in DIGU/DIGL
+extern double drive_min;               // minimum value of the drive slider
+extern double drive_max;               // maximum value of the drive slider
+extern double drive_digi_max;          // maximum value allowed in DIGU/DIGL
 
 extern int display_warnings;
 extern int display_pacurr;
 
 extern int hl2_audio_codec;
 extern int hl2_cl1_input;
+extern int hl2_ah4_atu;
 
 extern int anan10E;
 
@@ -288,17 +298,26 @@ extern const int tx_dialog_height;
 // exception: my_combo_attach()
 //
 extern gboolean radio_keypress_cb(GtkWidget *widget, GdkEventKey *event, gpointer data);
+extern void   radio_n2adr_oc_settings(void);
+extern void   radio_load_filters(int fb);
+extern void   radio_set_voxenable(int state);
+extern void   radio_set_voxlevel(double level);
 extern void   radio_set_mox(int state);
 extern void   radio_toggle_mox(void);
 extern void   radio_toggle_tune(void);
-extern void   radio_save_state();
-extern void   radio_stop(void);
+extern void   radio_save_state(void);
+extern void   radio_shutdown(void);
+extern void   radio_reboot(void);
+extern void   radio_exit_program(void);
+extern void   radio_stop_radio(void);
+extern void   radio_iconify(void);
 extern void   radio_reconfigure(void);
 extern void   radio_reconfigure_screen(void);
+extern void   radio_stop_program(void);
 extern void   radio_start_radio(void);
 extern void   radio_change_receivers(int r);
 extern void   radio_change_sample_rate(int rate);
-extern void   radio_apply_band_settings(int flag);
+extern void   radio_apply_band_settings(int flag, int id);
 extern void   radio_tx_vfo_changed(void);
 extern void   radio_split_toggle(void);
 extern void   radio_set_split(int v);
@@ -306,11 +325,21 @@ extern void   radio_set_mox(int state);
 extern void   radio_set_twotone(TRANSMITTER *tx, int state);
 extern int    radio_get_mox(void);
 extern void   radio_set_tune(int state);
+extern void   radio_set_duplex(int state);
+extern void   radio_set_cw_speed(int s);
+extern void   radio_set_sidetone_freq(int f);
 extern void   radio_set_vox(int state);
 extern double radio_get_drive(void);
 extern void   radio_set_drive(double d);
+extern void   radio_set_diversity(int state);
+extern void   radio_set_diversity_gain(double g);
+extern void   radio_set_diversity_phase(double p);
 extern void   radio_calc_drive_level(void);
+extern void   radio_calc_div_params(void);
 extern void   radio_calc_tune_drive_level(void);
+extern void   radio_set_panhigh(int id, int value);
+extern void   radio_set_panlow(int id, int value);
+extern void   radio_set_panstep(int id, int value);
 extern void   radio_set_attenuation(int id, int value);
 extern void   radio_set_random(int id, int value);
 extern void   radio_set_dither(int id, int value);
@@ -320,8 +349,8 @@ extern void   radio_set_alex_attenuation(int v);
 extern int    radio_is_transmitting(void);
 extern void   radio_set_satmode(int mode);
 extern int    radio_max_band(void);
-extern void   radio_start_playback(void);
-extern void   radio_end_playback(void);
+extern void   radio_start_xmit_captured_data(void);
+extern void   radio_end_xmit_captured_data(void);
 extern void   radio_start_capture(void);
 extern void   radio_end_capture(void);
 extern void   radio_protocol_run(void);
@@ -336,19 +365,23 @@ extern void   radio_set_af_gain(int id, double value);
 extern void   radio_set_rf_gain(int id, double value);
 extern void   radio_set_mic_gain(double value);
 extern void   radio_set_linein_gain(double value);
+extern void   radio_set_zoom(int id, int value);
+extern void   radio_set_pan(int id, int value);
 
 extern int compare_doubles(const void *a, const void *b);
 
-extern int  radio_remote_change_receivers(gpointer data);
-extern int  radio_remote_start(gpointer data);
-extern int  radio_remote_set_mox(gpointer data);
-extern int  radio_remote_set_vox(gpointer data);
-extern int  radio_remote_set_tune(gpointer data);
-extern int  radio_remote_set_twotone(gpointer data);
-extern int  radio_remote_protocol_run(gpointer data);
-extern int  radio_remote_protocol_stop(gpointer data);
+extern int  radio_client_change_receivers(gpointer data);
+extern int  radio_client_start(gpointer data);
+extern int  radio_client_set_mox(gpointer data);
+extern int  radio_client_set_vox(gpointer data);
+extern int  radio_client_set_tune(gpointer data);
+extern int  radio_client_set_twotone(gpointer data);
+extern int  radio_server_protocol_run(gpointer data);
+extern int  radio_server_protocol_stop(gpointer data);
 
 extern int optimize_for_touchscreen;
+extern int smeter3dB;
+
 extern void my_combo_attach(GtkGrid *grid, GtkWidget *combo, int row, int col, int spanrow, int spancol);
 
 //
@@ -360,7 +393,7 @@ extern void my_combo_attach(GtkGrid *grid, GtkWidget *combo, int row, int col, i
 #define ASSERT_SERVER(ret)                                                    \
     if (radio_is_remote) {                                                    \
       char *msg = g_new(char, 512);                                           \
-      snprintf(msg, 512, "WARNING %s:\nClient/Server Not Implemented!", __FUNCTION__); \
+      snprintf(msg, 512, "WARNING %s:\nClient/Server Not Implemented!", __func__); \
       g_idle_add(fatal_error, msg);                                           \
       return ret;                                                             \
    }

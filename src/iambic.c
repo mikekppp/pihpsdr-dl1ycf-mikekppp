@@ -235,8 +235,8 @@ extern int clock_nanosleep(clockid_t __clock_id, int __flags,
                            struct timespec *__rem);
 #endif
 
-static void keyer_close() {
-  t_print("%s\n", __FUNCTION__);
+static void keyer_close(void) {
+  t_print("%s\n", __func__);
   running = 0;
   // keyer thread may be sleeping, so wake it up
 #ifdef __APPLE__
@@ -252,9 +252,9 @@ static void keyer_close() {
 #endif
 }
 
-static int keyer_init() {
+static int keyer_init(void) {
   int rc;
-  t_print("%s\n", __FUNCTION__);
+  t_print("%s\n", __func__);
 #ifdef __APPLE__
   cw_event = apple_sem(0);
 #else
@@ -271,7 +271,7 @@ static int keyer_init() {
   return 0;
 }
 
-void keyer_update() {
+void keyer_update(void) {
   //
   // This function will take notice of changes in the following variables
   //
@@ -359,7 +359,7 @@ static void* keyer_thread(void *arg) {
   int txmode;
   int moxbefore;
   int cwvox;
-  t_print("%s: running= %d\n", __FUNCTION__, running);
+  t_print("%s: running= %d\n", __func__, running);
 
   while (running) {
     enforce_cw_vox = 0;
@@ -395,7 +395,7 @@ static void* keyer_thread(void *arg) {
     cwvox = 0; // if not using CW break-in this will stay at zero
 
     if (cw_breakin && (txmode == modeCWU || txmode == modeCWL)) {
-      g_idle_add(ext_set_mox, GINT_TO_POINTER(1));
+      g_idle_add(ext_radio_set_mox, GINT_TO_POINTER(1));
       //
       // Wait for mox, that is, wait for WDSP shutting down the RX and
       // firing up the TX. This induces a small delay when hitting the key for
@@ -434,7 +434,7 @@ static void* keyer_thread(void *arg) {
         if (cwvox == 0) {
           // we have just reduced cwvox from 1 to 0.
           if (!moxbefore) {
-            g_idle_add(ext_set_mox, GINT_TO_POINTER(0));
+            g_idle_add(ext_radio_set_mox, GINT_TO_POINTER(0));
             // Wait for MOX really gone. This is necessary since otherwise we may
             // still "see" PTT active upon the next key stroke and therefore fail
             // to go into CW-vox mode. However, only wait up to 250 msec
@@ -469,8 +469,10 @@ static void* keyer_thread(void *arg) {
           // the dash paddle wins.
           if (*kdash) {                  // send manual dashes
             tdown = loop_delay.tv_sec + 1.0E-9 * loop_delay.tv_nsec;
-            tx_queue_cw_event(1, 0);
+            tx_queue_cw_event(1, 0);  // immediate key-down
+#ifdef GPIO
             gpio_set_cw(1);
+#endif
             key_state = STRAIGHT;
           }
         } else {
@@ -496,8 +498,12 @@ static void* keyer_thread(void *arg) {
         // Wait for dash paddle being released in "straight key" mode.
         //
         if (! *kdash) {
+          // this does an "almost immediate" key-up. But it is ensured that the key-down lasts as long
+          // as it has really been down
           tx_queue_cw_event(0, (int)((loop_delay.tv_sec + 1.0E-9 * loop_delay.tv_nsec - tdown) * 48000.0));
+#ifdef GPIO
           gpio_set_cw(0);
+#endif
           key_state = CHECK;
         } else {
           loop_delay.tv_nsec += 1000000;
@@ -511,10 +517,21 @@ static void* keyer_thread(void *arg) {
         //
         dash_memory = 0;
         dash_held = *kdash;
+#ifdef GPIO
         gpio_set_cw(1);
-        tx_queue_cw_event (1, 0);
-        tx_queue_cw_event (0, dot_samples);
-        tx_queue_cw_event (0, dot_samples);
+#endif
+        tx_queue_cw_event (1, 0);            // immediate key-down
+        tx_queue_cw_event (0, dot_samples);  // wait dot length, then key-up
+        tx_queue_cw_event (0, dot_samples);  // wait dot length, then key-up
+#ifdef GPIO
+        //
+        // Wait until the end of the dot, then de-activate CW GPIO line
+        // This "busy wait" is over long before the clock_nanosleep()
+        // at the end of the loop is due.
+        //
+	usleep((1000L * dot_samples) / 48);
+        gpio_set_cw(0);
+#endif
         //
         // wait for end of inter-element pause
         //
@@ -568,10 +585,21 @@ static void* keyer_thread(void *arg) {
         //
         dot_memory =  0;
         dot_held = *kdot;  // remember if dot is still held at beginning of the dash
+#ifdef GPIO
         gpio_set_cw(1);
-        tx_queue_cw_event (1, 0);
-        tx_queue_cw_event (0, dash_samples);
-        tx_queue_cw_event (0, dot_samples);
+#endif
+        tx_queue_cw_event (1, 0);              // immediate key-down
+        tx_queue_cw_event (0, dash_samples);   // wait dash length, then key-up
+        tx_queue_cw_event (0, dot_samples);    // wait dash length, then key-up
+#ifdef GPIO
+        //
+        // Wait until the end of the dot, then de-activate CW GPIO line
+        // This "busy wait" is over long before the clock_nanosleep()
+        // at the end of the loop is due.
+        //
+	usleep((1000L * dash_samples) / 48);
+        gpio_set_cw(0);
+#endif
         loop_delay.tv_nsec += (dash_samples + dot_samples) * 20833;
         key_state = AFTERDASH;
         break;
@@ -621,7 +649,7 @@ static void* keyer_thread(void *arg) {
         break;
 
       default:
-        t_print("%s: unknown state=%d", __FUNCTION__, (int) key_state);
+        t_print("%s: unknown state=%d", __func__, (int) key_state);
         key_state = EXITLOOP;
       }
 
@@ -634,6 +662,6 @@ static void* keyer_thread(void *arg) {
     }
   }
 
-  t_print("%s: EXIT\n", __FUNCTION__);
+  t_print("%s: EXIT\n", __func__);
   return NULL;
 }

@@ -78,6 +78,11 @@ enum ACTION {
   CW_KEYER_KEYDOWN,
   CW_KEYER_PTT,
   CW_KEYER_SPEED,
+  CW_TXT_1,
+  CW_TXT_2,
+  CW_TXT_3,
+  CW_TXT_4,
+  CW_TXT_5,
   DIV,
   DIV_GAIN,
   DIV_GAIN_COARSE,
@@ -93,8 +98,10 @@ enum ACTION {
   FILTER_CUT_HIGH,
   FILTER_CUT_DEFAULT,
   MENU_FILTER,
+  MENU_FREQUENCY,
   FUNCTION,
   FUNCTIONREV,
+  ICONIFY,
   IF_SHIFT,
   IF_SHIFT_RX1,
   IF_SHIFT_RX2,
@@ -145,6 +152,7 @@ enum ACTION {
   PS,
   MENU_PS,
   PTT,
+  MENU_RADIO,
   RCL0,
   RCL1,
   RCL2,
@@ -155,6 +163,7 @@ enum ACTION {
   RCL7,
   RCL8,
   RCL9,
+  REPLAY,
   RF_GAIN,
   RF_GAIN_RX1,
   RF_GAIN_RX2,
@@ -188,7 +197,6 @@ enum ACTION {
   TOOLBAR5,
   TOOLBAR6,
   TOOLBAR7,
-  TOOLBAR8,
   TUNE,
   TUNE_DRIVE,
   TUNE_FULL,
@@ -197,7 +205,6 @@ enum ACTION {
   TWO_TONE,
   MENU_TX,
   VFO,
-  MENU_FREQUENCY,
   VFO_STEP_MINUS,
   VFO_STEP_PLUS,
   VFOA,
@@ -218,12 +225,11 @@ enum ACTION {
 };
 
 enum ACTIONtype {
-  TYPE_NONE = 0,
-  MIDI_KEY = 1,         // MIDI Button (press event)
-  MIDI_KNOB = 2,        // MIDI Knob   (value between 0 and 100)
-  MIDI_WHEEL = 4,       // MIDI Wheel  (direction and speed)
-  CONTROLLER_SWITCH = 8, // Controller Button
-  CONTROLLER_ENCODER = 16 // Controller Encoder
+  AT_NONE = 0,
+  AT_BTN  = 1,     // push-button (press/release event)
+  AT_KNB  = 2,     // Knob "Potentiometer"  (value between 0 and 127)
+  AT_ENC  = 4,     // Encoder (increment)
+  AT_SLD  = 8,     // action that can be assigned to sliders in the Slider area
 };
 
 typedef struct _action_table {
@@ -256,7 +262,9 @@ extern ACTION_TABLE ActionTable[ACTIONS + 1];
 extern int process_action(void *data);
 extern void schedule_action(enum ACTION action, enum ACTION_MODE mode, int val);
 extern void Action2String(const int id, char *str, size_t len);
-extern int  String2Action(const char *str);
+extern enum ACTION String2Action(const char *str);
+extern char *ActionType2String(enum ACTIONtype type);
+extern enum ACTIONtype String2ActionType(const char *str);
 extern void GetMultifunctionString(char* str, size_t len);
 extern int  GetMultifunctionStatus(void);
 #endif

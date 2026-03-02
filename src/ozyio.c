@@ -39,7 +39,7 @@
 #include <sys/stat.h> // for stat
 #include <unistd.h>   // for readlink, sleep, getcwd
 
-#include <libusb-1.0/libusb.h>
+#include <libusb.h>
 
 #include "message.h"
 #include "ozyio.h"
@@ -88,7 +88,7 @@ unsigned int penny_fp = 0, penny_rp = 0, penny_alc = 0;
 unsigned int mercury_overload[2] = {0, 0};
 unsigned char ozy_firmware_version[9];
 
-static int ozy_open() {
+static int ozy_open(void) {
   int rc;
 
   if (init == 0) {
@@ -125,7 +125,7 @@ static int ozy_open() {
   return 0;
 }
 
-static int ozy_close() {
+static int ozy_close(void) {
   int rc;
   rc = libusb_attach_kernel_driver(ozy_handle, 0);
 
@@ -158,7 +158,7 @@ int ozy_write(int ep, unsigned char* buffer, int buffer_size) {
   rc = libusb_bulk_transfer(ozy_handle, (unsigned char)ep, buffer, buffer_size, &bytes, OZY_IO_TIMEOUT);
 
   if (rc == USB_TIMEOUT) {
-    t_print("%s: timeout bytes=%d ep=%d\n", __FUNCTION__, bytes, ep);
+    t_print("%s: timeout bytes=%d ep=%d\n", __func__, bytes, ep);
     libusb_clear_halt(ozy_handle, (unsigned char)ep);
   }
 
@@ -303,6 +303,7 @@ static int ozy_load_firmware(const char *fnamep) {
 
         if ( this_val < 0 ) {
           t_print( "ozy_upload_firmware: bad record data\n");
+          fclose(ifile);
           return 0;
         }
 
@@ -314,6 +315,7 @@ static int ozy_load_firmware(const char *fnamep) {
 
       if ( this_val < 0 ) {
         t_print( "ozy_upload_firmware: bad checksum data\n");
+        fclose(ifile);
         return 0;
       }
 
@@ -326,11 +328,13 @@ static int ozy_load_firmware(const char *fnamep) {
 
       if (((cksum + my_cksum) & 0xff) != 0) {
         t_print( "ozy_upload_firmware: bad checksum\n");
+        fclose(ifile);
         return 0;
       }
 
       if ( ozy_write_ram(addr, wbuf, length) < 1 ) {
         t_print( "ozy_upload_firmware: bad write\n");
+        fclose(ifile);
         return 0;
       }
 
@@ -341,6 +345,7 @@ static int ozy_load_firmware(const char *fnamep) {
 
     default: /* invalid */
       t_print( "ozy_upload_firmware: invalid type\n");
+      fclose(ifile);
       return 0;
     }
   }
@@ -575,7 +580,7 @@ void writepenny(int reset, int mode) {
   }
 }
 
-void ozy_i2c_readvars() {
+void ozy_i2c_readvars(void) {
   int rc = 0;
   unsigned char buffer[8];
   t_print("ozy_i2c_init: starting\n");
@@ -706,7 +711,7 @@ static void filePath (char *sOut, const char *sIn, size_t len) {
 // initialise a USB ozy device.
 // renamed as "initialise" and combined with the "ozyinit" code
 //
-int ozy_initialise() {
+int ozy_initialise(void) {
   int rc;
 
   if (strlen(ozy_firmware) == 0) { filePath (ozy_firmware, "ozyfw-sdr1k.hex", sizeof(ozy_firmware)); }
@@ -752,7 +757,7 @@ int ozy_initialise() {
 // returns 1 if a device found on USB
 //
 //
-int ozy_discover() {
+int ozy_discover(void) {
   int success = 0;            // function return code
 
   if (init == 0) {

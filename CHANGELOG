@@ -1,15 +1,132 @@
 LIST OF RECENT PIHPSDR CHANGES
 ==============================
+
+Feburary 2026:
+-------------
+
+- New Release branch Rel-2.6 (Release 2.6)
+  created, master branch will be advanced to
+  v2.7 soon
+
+- Allow changing "fixed" filters via hand-editing
+  the props file
+
+- Added "Add Mic Sample" option in the TX menu
+  (HPSDR radios only), this support use of logbook
+  programs with voice keyer functions
+
+January 2026:
+-------------
+
+- improved the pulseaudio.c module for a low-latency
+  CW side tone.
+
+- added option for having 3dB per S-meter step
+
+- updated 60m "US channels" according to FCC 25-60
+  (this gives you a WRC15 60m band and 4 domestic
+  channels).
+
+- added PTT-over-serial-port (DTR/CTS) option, this also
+  includes a PTT-out signal on RTS.
+
+- added CW texts that can be changed in the CW menu and
+  transmitted upon pushing a (physical) button or clicking a 
+  toolbar (on-screen) button.
+
+- re-worked the "machine specific" settings in the Radio menu.
+
+- Added NR3 and NR4 noise reduction, and updated to WDSP 1.29.
+  NR3 (RNNoise) and NR4 (libspecbleach) software is bundled with
+  piHPSDR, but one can use "installed" versions (with proper
+  CPU-specific optimisations) using the new compile-time
+  option NR34LIB.
+
+December 2025:
+______________
+
+- added "TX monitor" option: TX *input* audio
+  samples are re-played "as is" on the RX
+  output channel if this option is enabled
+  in the TX menu.
+
+November 2025:
+--------------
+- client/server: send periodic data (Audio,
+  Pandapter data) via UDP and reserve the
+  TCP channel for "mission critical" data.
+  This should increase the tolerance w.r.t.
+  short-time internet connection dropouts
+
+- store/restore local RX1 and TX audio settings
+  "with the mode". So once can automatically
+   switche between Headphone/Microphone and
+   virtual audio cables when switching from
+   USB to DIGU.
+
+- Reworked P1 start/restart procedure
+
+- fix the "locale" to "C", to avoid possible
+  non-printable or non-portable characters
+  in numbers
+
+October 2025:
+-------------
+
+- New 2.5 Release created (the branch is Rel-2.5) and
+  master branch advanced to 2.6
+
+- updated to WDSP version 1.28 (WDSP maintenance update)
+
+- use mono for RX audio transfer in client/server
+  since this halves the required band width
+
+- all client/server data structures now with proper
+  alignment
+
+- changed automatic "waterfall low" determination
+
+- overhauled GPIO code, such that it works with both
+  the V1 and V2 API of libgpild
+
+- made the GPIO VFO knob "progressive"
+
+- moved to WDSP version 1.27, added the "NR2 post-processing"
+  features introduced there
+
+September 2025:
+---------------
+ - added "Replay" action (local replay of captured data)
+
+ - panadapter high/low now also stored with the band
+
+ - pulseaudio: suppress some RX audio if too much
+   latency has been accumulated
+
+ - re-newed the piHPSDR logo
+
+ - slider and toolbar reworked, new "Sliders" menu
+
 August 2025:
 ------------
+
+- separated client/server stuff in several files
+
+- new "VFO snap" option to enable/disable rounding
+  of VFO updates to the nearest multiple of the
+  VFO step size
 
 - Re-wrote zoom/pan functionality. Now much larger zoom
   factors are possible. Currently we impose a max of 32
   but this could be even larger.
 
+- proper normalization for the RX spectrum
+
 - Modified the screen size menu to allow for fast switching
   between some "predefined" and a "custom" size
   (tnx Perrin for suggesting this).
+
+- Fully configurable Slider and Toolbar areas
 
 July 2025:
 ----------

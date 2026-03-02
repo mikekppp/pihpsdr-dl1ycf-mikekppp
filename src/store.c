@@ -34,10 +34,10 @@
 #include "store_menu.h"
 #include "vfo.h"
 
-MEM mem[NUM_OF_MEMORYS];  // This makes it a compile time option
+MEM mem[NUM_MEMORIES];  // This makes it a compile time option
 
-void memSaveState() {
-  for (int b = 0; b < NUM_OF_MEMORYS; b++) {
+void mem_save_state(void) {
+  for (int b = 0; b < NUM_MEMORIES; b++) {
     SetPropI1("mem.%d.sat_mode", b,        mem[b].sat_mode);
     SetPropI1("mem.%d.freqA", b,           mem[b].frequency);
     SetPropI1("mem.%d.freqC", b,           mem[b].ctun_frequency);
@@ -58,8 +58,8 @@ void memSaveState() {
   }
 }
 
-void memRestoreState() {
-  for (int b = 0; b < NUM_OF_MEMORYS; b++) {
+void mem_restore_state(void) {
+  for (int b = 0; b < NUM_MEMORIES; b++) {
     //
     // Set defaults
     //
@@ -105,7 +105,7 @@ void memRestoreState() {
 
 void recall_memory_slot(int index) {
   if (radio_is_remote) {
-    send_recall(client_socket, index);
+    send_recall(cl_sock_tcp, index);
     return;
   }
 
@@ -187,8 +187,7 @@ void recall_memory_slot(int index) {
     radio_set_split(mem[index].split);
 
     if (!radio_is_transmitting()) {
-      duplex = mem[index].duplex;
-      g_idle_add(ext_set_duplex, NULL);
+      g_idle_add(ext_radio_set_duplex, GINT_TO_POINTER(mem[index].duplex));
     }
   }
 
@@ -248,7 +247,7 @@ void store_memory_slot(int index) {
     // the updated memory slot but this arrives too late to get
     // the menu button updated.
     //
-    send_store(client_socket, index);
+    send_store(cl_sock_tcp, index);
     return;
   }
 }

@@ -37,7 +37,7 @@
 #define ODEV_NONE          999
 #define ODEV_METIS           0
 #define ODEV_HERMES          1
-#define ODEV_GRIFFIN         2
+#define ODEV_HERMES2         2
 #define ODEV_ANGELIA         4
 #define ODEV_ORION           5
 #define ODEV_HERMES_LITE     6
@@ -61,7 +61,7 @@ EXTERN int OLDDEVICE;
 EXTERN int NEWDEVICE;
 
 //
-// A table of (random) noise with about -90 dBm on the whole spectrum
+// A table of (random) noise the whole spectrum
 // This is a very long table such that there is no audible "beating"
 // pattern even at very high sample rates.
 //
@@ -83,6 +83,13 @@ EXTERN int nb_pulse, nb_width;
 #define LENDIV 48000
 EXTERN double divtab[LENDIV];
 
+//
+// A table of RX IQ data (60 seconds 48k sample rate)
+// with speech.
+//
+#define NUMDUMP 60*48000
+EXTERN int have_rxiq;
+EXTERN unsigned char *rxiqdump;
 //
 // TX fifo (needed for PureSignal)
 //
@@ -143,6 +150,10 @@ EXTERN uint8_t radio_ptt, radio_dash, radio_dot;
 EXTERN uint8_t radio_io1, radio_io2, radio_io3, radio_io4;
 EXTERN uint8_t radio_io5, radio_io6, radio_io8;
 
+//
+// Flag for modifying the clock speed of the radio
+//
+EXTERN int speed;
 //
 // message printing
 //

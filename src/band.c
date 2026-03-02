@@ -315,41 +315,41 @@ static BANDSTACK bandstack_xvtr_9 = {3, 0, bandstack_entries_xvtr_9};
 
 // *INDENT-OFF*
 static BAND bands[BANDS + XVTRS] = {
-  {"136kHz", &bandstack136,     0, 0, 0, 0, 0, 53.0,     135700LL,     137800LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"472kHz", &bandstack472,     0, 0, 0, 0, 0, 53.0,     472000LL,     479000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"160",    &bandstack160,     0, 0, 0, 0, 0, 53.0,    1800000LL,    2000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"80",     &bandstack80,      0, 0, 0, 0, 0, 53.0,    3500000LL,    4000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"60",     &bandstack60,      0, 0, 0, 0, 0, 53.0,    5250000LL,    5450000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"40",     &bandstack40,      0, 0, 0, 0, 0, 53.0,    7000000LL,    7300000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"30",     &bandstack30,      0, 0, 0, 0, 0, 53.0,   10100000LL,   10150000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"20",     &bandstack20,      0, 0, 0, 0, 0, 53.0,   14000000LL,   14350000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"17",     &bandstack17,      0, 0, 0, 0, 0, 53.0,   18068000LL,   18168000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"15",     &bandstack15,      0, 0, 0, 0, 0, 53.0,   21000000LL,   21450000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"12",     &bandstack12,      0, 0, 0, 0, 0, 53.0,   24890000LL,   24990000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"10",     &bandstack10,      0, 0, 0, 0, 0, 53.0,   28000000LL,   29700000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"6",      &bandstack6,       0, 0, 0, 0, 0, 53.0,   50000000LL,   54000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"4",      &bandstack70,      0, 0, 0, 0, 0, 53.0,   70000000LL,   70500000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"144",    &bandstack144,     0, 0, 0, 0, 0, 53.0,  144000000LL,  148000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"220",    &bandstack220,     0, 0, 0, 0, 0, 53.0,  220000000LL,  224980000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"430",    &bandstack430,     0, 0, 0, 0, 0, 53.0,  420000000LL,  450000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"902",    &bandstack902,     0, 0, 0, 0, 0, 53.0,  902000000LL,  928000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"1240",   &bandstack1240,    0, 0, 0, 0, 0, 53.0, 1240000000LL, 1300000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"2300",   &bandstack2300,    0, 0, 0, 0, 0, 53.0, 2300000000LL, 2450000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"3400",   &bandstack3400,    0, 0, 0, 0, 0, 53.0, 3400000000LL, 3410000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"AIR",    &bandstackAIR,     0, 0, 0, 0, 0, 53.0,  108000000LL,  137000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"WWV",    &bandstackWWV,     0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
-  {"GEN",    &bandstackGEN,     0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0},
+  {"136kHz", &bandstack136,     0, 0, 0, 0, 0, 53.0,     135700LL,     137800LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"472kHz", &bandstack472,     0, 0, 0, 0, 0, 53.0,     472000LL,     479000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"160",    &bandstack160,     0, 0, 0, 0, 0, 53.0,    1800000LL,    2000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"80",     &bandstack80,      0, 0, 0, 0, 0, 53.0,    3500000LL,    4000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"60",     &bandstack60,      0, 0, 0, 0, 0, 53.0,    5250000LL,    5450000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"40",     &bandstack40,      0, 0, 0, 0, 0, 53.0,    7000000LL,    7300000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"30",     &bandstack30,      0, 0, 0, 0, 0, 53.0,   10100000LL,   10150000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"20",     &bandstack20,      0, 0, 0, 0, 0, 53.0,   14000000LL,   14350000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"17",     &bandstack17,      0, 0, 0, 0, 0, 53.0,   18068000LL,   18168000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"15",     &bandstack15,      0, 0, 0, 0, 0, 53.0,   21000000LL,   21450000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"12",     &bandstack12,      0, 0, 0, 0, 0, 53.0,   24890000LL,   24990000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"10",     &bandstack10,      0, 0, 0, 0, 0, 53.0,   28000000LL,   29700000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"6",      &bandstack6,       0, 0, 0, 0, 0, 53.0,   50000000LL,   54000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"4",      &bandstack70,      0, 0, 0, 0, 0, 53.0,   70000000LL,   70500000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"144",    &bandstack144,     0, 0, 0, 0, 0, 53.0,  144000000LL,  148000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"220",    &bandstack220,     0, 0, 0, 0, 0, 53.0,  220000000LL,  224980000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"430",    &bandstack430,     0, 0, 0, 0, 0, 53.0,  420000000LL,  450000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"902",    &bandstack902,     0, 0, 0, 0, 0, 53.0,  902000000LL,  928000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"1240",   &bandstack1240,    0, 0, 0, 0, 0, 53.0, 1240000000LL, 1300000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"2300",   &bandstack2300,    0, 0, 0, 0, 0, 53.0, 2300000000LL, 2450000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"3400",   &bandstack3400,    0, 0, 0, 0, 0, 53.0, 3400000000LL, 3410000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"AIR",    &bandstackAIR,     0, 0, 0, 0, 0, 53.0,  108000000LL,  137000000LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"WWV",    &bandstackWWV,     0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"GEN",    &bandstackGEN,     0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 0, 0, 0, 0, 0, 0, -140, -40, 20},
   // XVTRS
-  {"",       &bandstack_xvtr_0, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_1, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_2, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_3, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_4, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_5, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_6, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_7, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_8, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0},
-  {"",       &bandstack_xvtr_9, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0}
+  {"",       &bandstack_xvtr_0, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_1, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_2, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_3, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_4, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_5, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_6, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_7, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_8, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20},
+  {"",       &bandstack_xvtr_9, 0, 0, 0, 0, 0, 53.0,          0LL,          0LL, 0LL, 0LL, 1, 0, 0, 0, 0, 0, -140, -40, 20}
 };
 // *INDENT-ON*
 
@@ -374,12 +374,13 @@ static CHANNEL band_channels_60m_UK[UK_CHANNEL_ENTRIES] = {
 static CHANNEL band_channels_60m_WRC15[WRC15_CHANNEL_ENTRIES] =
 {{5359000LL, 15000LL}};
 
+
 static CHANNEL band_channels_60m_OTHER[OTHER_CHANNEL_ENTRIES] = {
-  {5332000LL, 2800LL},
-  {5348000LL, 2800LL},
-  {5358500LL, 2800LL},
-  {5373000LL, 2800LL},
-  {5405000LL, 2800LL}
+  {5332000LL,  2800LL},
+  {5348000LL,  2800LL},
+  {5359000LL, 15000LL},  // FCC 25-60, IIIB1, makes this a "WRC15 channel".
+  {5373000LL,  2800LL},
+  {5405000LL,  2800LL}
 };
 
 //
@@ -429,7 +430,7 @@ void radio_change_region(int r) {
   }
 }
 
-void bandSaveState() {
+void band_save_state(void) {
   for (int b = 0; b < BANDS + XVTRS; b++) {
     //
     // Skip non-assigned transverter bands
@@ -449,6 +450,9 @@ void bandSaveState() {
     SetPropI1("band.%d.current", b,            bands[b].bandstack->current_entry);
     SetPropI1("band.%d.preamp", b,             bands[b].preamp);
     SetPropI1("band.%d.dither", b,             bands[b].dither);
+    SetPropI1("band.%d.panhigh", b,            bands[b].panhigh);
+    SetPropI1("band.%d.panlow", b,             bands[b].panlow);
+    SetPropI1("band.%d.panstep", b,            bands[b].panstep);
 
     if (have_rx_att) {
       SetPropI1("band.%d.attenuation", b,        bands[b].attenuation);
@@ -480,7 +484,7 @@ void bandSaveState() {
   }
 }
 
-void bandRestoreState() {
+void band_restore_state(void) {
   for (int b = 0; b < BANDS + XVTRS; b++) {
     //
     // The No. 1 problem for new HermesLite users is "no RF output",
@@ -518,6 +522,9 @@ void bandRestoreState() {
     GetPropI1("band.%d.current", b,            bands[b].bandstack->current_entry);
     GetPropI1("band.%d.preamp", b,             bands[b].preamp);
     GetPropI1("band.%d.dither", b,             bands[b].dither);
+    GetPropI1("band.%d.panhigh", b,            bands[b].panhigh);
+    GetPropI1("band.%d.panlow", b,             bands[b].panlow);
+    GetPropI1("band.%d.panstep", b,            bands[b].panstep);
 
     if (have_rx_att) {
       GetPropI1("band.%d.attenuation", b,      bands[b].attenuation);
@@ -667,13 +674,13 @@ char* getFrequencyInfo(long long frequency, int filter_low, int filter_high) {
     }
   }
 
-  t_print("%s: %lld H7z ==>  %s\n", __FUNCTION__, frequency, result);
+  t_print("%s: %lld H7z ==>  %s\n", __func__, frequency, result);
   return result;
 }
 
 #endif
 
-int TransmitAllowed() {
+int TransmitAllowed(void) {
   int result;
   long long txfreq, flow, fhigh;
   int txb, txvfo, txmode;
@@ -743,8 +750,6 @@ int TransmitAllowed() {
 }
 
 void band_plus(int id) {
-  long long frequency_min = radio->frequency_min;
-  long long frequency_max = radio->frequency_max;
   int b = vfo[id].band;
   int found = 0;
 
@@ -756,24 +761,21 @@ void band_plus(int id) {
 
     band = (BAND*)band_get_band(b);
 
+    //
+    // a) skip non-assigned transverter bands.
+    // b) skip bands where the band failed (frequency
+    //    of the "new" bandstack is outside the radio range,
+    //    Example: WWV band on AdalmPluto)
+    //
     if (strlen(band->title) > 0) {
-      if (b < BANDS) {
-        if (!(band->frequencyMin == 0.0 && band->frequencyMax == 0.0)) {
-          if (band->frequencyMin < frequency_min || band->frequencyMax > frequency_max) {
-            continue;
-          }
-        }
-      }
-
       vfo_id_band_changed(id, b);
-      found = 1;
+
+      if (vfo[id].band == b) { found = 1; }
     }
   }
 }
 
 void band_minus(int id) {
-  long long frequency_min = radio->frequency_min;
-  long long frequency_max = radio->frequency_max;
   int b = vfo[id].band;
   int found = 0;
 
@@ -785,15 +787,16 @@ void band_minus(int id) {
 
     band = (BAND*)band_get_band(b);
 
+    //
+    // a) skip non-assigned transverter bands.
+    // b) skip bands where the band failed (frequency
+    //    of the "new" bandstack is outside the radio range,
+    //    Example: WWV band on AdalmPluto)
+    //
     if (strlen(band->title) > 0) {
-      if (b < BANDS) {
-        if (band->frequencyMin < frequency_min || band->frequencyMax > frequency_max) {
-          continue;
-        }
-      }
-
       vfo_id_band_changed(id, b);
-      found = 1;
+
+      if (vfo[id].band == b) { found = 1; }
     }
   }
 }

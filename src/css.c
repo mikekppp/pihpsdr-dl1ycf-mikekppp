@@ -61,7 +61,7 @@
 // popup_scale         Used to define the slider that "pops up" when e.g. AF volume
 //                     is changed via GPIO/MIDI but no sliders are on display
 //
-// checkbutton         THe standard button is Very difficult to see on RaspPi with
+// checkbutton         The standard button is very difficult to see on RaspPi with
 //                     a light GTK theme. So we use our own, and draw a grey border
 //                     so this should be OK for both the light and dark theme.
 //
@@ -216,7 +216,7 @@ void load_font(int font) {
   (void) gtk_css_provider_load_from_data(provider, str, -1, &error);
 
   if (error != NULL) {
-    t_print("%s: %s\n", __FUNCTION__, error->message);
+    t_print("%s: %s\n", __func__, error->message);
     g_clear_error(&error);
   }
 
@@ -229,7 +229,7 @@ void load_font(int font) {
 // If the CSS comes from a file, its font family name is not changed,
 // but the argument "font" in any case applies to the VFO bar
 //
-void load_css() {
+void load_css(void) {
   GtkCssProvider *provider;
   GdkDisplay *display;
   GdkScreen *screen;
@@ -249,7 +249,7 @@ void load_css() {
     // the following error message will always appear although this does
     // not indicate a problem.
     //
-    t_print("%s: %s\n", __FUNCTION__, error->message);
+    t_print("%s: %s\n", __func__, error->message);
     g_clear_error(&error);
     (void) gtk_css_provider_load_from_data(provider, css, -1, &error);
 
@@ -258,7 +258,7 @@ void load_css() {
       // If this error message appears, this usually flags an error
       // in the hard-wired CSS data.
       //
-      t_print("%s: %s\n", __FUNCTION__, error->message);
+      t_print("%s: %s\n", __func__, error->message);
       g_clear_error(&error);
     }
   }

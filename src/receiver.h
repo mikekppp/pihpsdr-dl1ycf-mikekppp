@@ -59,14 +59,12 @@ typedef struct _receiver {
   double agc_thresh;
   int fps;
   int displaying;
-  int audio_channel; // STEREO or LEFT or RIGHT
   int sample_rate;
   int pixels;
   int samples;
   int output_samples;
   double *iq_input_buffer;
   double *audio_output_buffer;
-  int audio_index;
   float *pixel_samples;
   int display_panadapter;
   int display_waterfall;
@@ -112,9 +110,13 @@ typedef struct _receiver {
   //
   int nr2_gain_method;
   int nr2_npe_method;
-  int nr2_ae;
   double nr2_trained_threshold;
   double nr2_trained_t2;
+  int nr2_post; // post-NR2 corrections on/off
+  int nr2_post_nlevel;
+  int nr2_post_factor;
+  int nr2_post_rate;
+  int nr2_post_taper;
 
   //
   // Noise blanker parameters. These parameters have
@@ -140,22 +142,22 @@ typedef struct _receiver {
   // nb2_mode = 3:  hold-sample
   // nb2_mode = 4:  interpolate
 
-#ifdef EXTNR
   //
-  // NR4 parameters. Only used if compiled with EXTNR
+  // NR4 parameters.
   //
   double nr4_reduction_amount;
   double nr4_smoothing_factor;
   double nr4_whitening_factor;
   double nr4_noise_rescale;
   double nr4_post_threshold;
-#endif
+  int    nr4_noise_scaling_type;
 
   int filter_low;
   int filter_high;
 
   int width;
   int height;
+  int afft_size;  // FFT size of the display analyzer
 
   GtkWidget *panel;
   GtkWidget *panadapter;
@@ -177,41 +179,42 @@ typedef struct _receiver {
   int waterfall_percent;
   cairo_surface_t *panadapter_surface;
   GdkPixbuf *pixbuf;
-  int local_audio;
   int mute_when_not_active;
-  int audio_device;
-  gchar audio_name[128];
+
+  //
+  // Everything related to audio
+  //
+  int audio_channel; // STEREO or LEFT or RIGHT
+  int local_audio;
+  char audio_name[128];
+  GMutex audio_mutex;
+  double *audio_buffer;
+  int audio_buffer_offset;
+  volatile int audio_buffer_inpt;    // pointer in audio ring-buffer
+  volatile int audio_buffer_outpt;   // pointer in audio ring-buffer
 
 #if defined(PORTAUDIO) && defined(PULSEAUDIO) && defined(ALSA)
   // this is only possible for "cppcheck" runs
   // declare all data without conflicts
-  void *playstream;
-  int local_audio_buffer_inpt;
-  int local_audio_buffer_outpt;
-  int local_audio_buffer_offset;
-  void *local_audio_buffer;
-  snd_pcm_t *playback_handle;
-  snd_pcm_format_t local_audio_format;
+  void *audio_handle;
+  snd_pcm_format_t audio_format;
+  int latency;
 #endif
 #if defined(PORTAUDIO) && !defined(PULSEAUDIO) && !defined(ALSA)
-  PaStream *playstream;
-  volatile int local_audio_buffer_inpt;    // pointer in audio ring-buffer
-  volatile int local_audio_buffer_outpt;   // pointer in audio ring-buffer
-  float *local_audio_buffer;
+  PaStream *audio_handle;
 #endif
 #if !defined(PORTAUDIO) && !defined(PULSEAUDIO) && defined(ALSA)
-  snd_pcm_t *playback_handle;
-  snd_pcm_format_t local_audio_format;
-  void *local_audio_buffer;        // different formats possible, so void*
-  int local_audio_buffer_offset;
+  snd_pcm_t *audio_handle;
+  snd_pcm_format_t audio_format;
 #endif
 #if !defined(PORTAUDIO) && defined(PULSEAUDIO) && !defined(ALSA)
-  pa_simple *playstream;
-  float *local_audio_buffer;
-  int local_audio_buffer_offset;
+  pa_simple *audio_handle;
+  pa_usec_t latency;
 #endif
 
-  GMutex local_audio_mutex;
+  int cwaudio;   // detect RX/TX transitions in CW
+  int cwcount;   // for sample insertion and deletion
+  int skipcnt;   // for latency management
 
   int squelch_enable;
   double squelch;
@@ -251,6 +254,15 @@ typedef struct _receiver {
   double cB;
   double cAp;
   double cBp;
+  //
+  // After changing the Zoom/Pan value, it takes a little time before the
+  // first spectrum is available. If no RX panadapter screen update occurs
+  // during this time, the frequency labels are also not drawn but one
+  // really wants to see them moving when moving the PAN slider. Therefore
+  // we record analyzer changes so we can take care then panadapter is
+  // drawn (without a spectrum) once after the analyzer changes.
+  int analyzer_initializing;
+  int pixels_available;
 
   int x;
   int y;
@@ -294,11 +306,11 @@ extern void   rx_change_adc(const RECEIVER *rx);
 extern void   rx_close(const RECEIVER *rx);
 extern void   rx_create_analyzer(RECEIVER *rx);
 extern void   rx_filter_changed(RECEIVER *rx);
-extern int    rx_get_pixels(RECEIVER *rx);
+extern void   rx_get_pixels(RECEIVER *rx);
 extern double rx_get_smeter(const RECEIVER *rx);
 extern void   rx_frequency_changed(const RECEIVER *rx);
 extern void   rx_mode_changed(RECEIVER *rx);
-extern void   rx_off(const RECEIVER *rx);
+extern void   rx_off(const RECEIVER *rx, int wait);
 extern void   rx_on(const RECEIVER *rx);
 extern void   rx_reconfigure(RECEIVER *rx, int height);
 extern void   rx_restore_state(RECEIVER *rx);
@@ -322,7 +334,7 @@ extern void   rx_set_fft_latency(const RECEIVER *rx);
 extern void   rx_set_fft_size(const RECEIVER *rx);
 extern void   rx_set_filter(RECEIVER *rx);
 extern void   rx_set_framerate(RECEIVER *rx);
-extern void   rx_set_frequency(RECEIVER *rx, long long frequency);
+extern void   rx_set_frequency(const RECEIVER *rx, long long frequency);
 extern void   rx_set_mode(const RECEIVER* rx);
 extern void   rx_set_noise(const RECEIVER *rx);
 extern void   rx_set_offset(const RECEIVER *rx);
@@ -334,6 +346,5 @@ extern void   rx_update_width(RECEIVER *rx);
 extern void   rx_update_pan(RECEIVER *rx);
 
 extern void rx_create_remote(RECEIVER *rx);
-extern int  rx_remote_update_display(gpointer data);
 
 #endif
