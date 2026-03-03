@@ -119,7 +119,7 @@ static int PTTIN_LINE = -1;
 
 static int num_input_lines = 0;
 static int input_lines[MAX_LINES] = { -1 };
-static int input_pullup[MAX_LINES] = { -1 };
+static int input_pullup[MAX_LINES] = { 1 };
 static int input_debounce[MAX_LINES] = { 0 };
 static int output_lines[NUM_OUTPUT_LINES] = { -1 };
 
