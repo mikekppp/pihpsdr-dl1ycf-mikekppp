@@ -1000,7 +1000,13 @@ static gpointer listen_thread(gpointer arg) {
                   (struct sockaddr *)&remoteclient.address, &addrlen);
 
     if (rc != SHA512_DIGEST_LENGTH) {
-      t_print("Server: UDP test packet ret=%d\n", rc);
+
+      if (rc < 0) {
+        t_perror("Server: UDP read test");
+      } else {
+        t_print("Server: UDP test packet short read (%d bytes)\n", rc);
+      }
+
       continue;
     }
 

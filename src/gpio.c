@@ -119,7 +119,7 @@ static int PTTIN_LINE = -1;
 
 static int num_input_lines = 0;
 static int input_lines[MAX_LINES] = { -1 };
-static int input_pullup[MAX_LINES] = { -1 };
+static int input_pullup[MAX_LINES] = { 1 };
 static int input_debounce[MAX_LINES] = { 0 };
 static int output_lines[NUM_OUTPUT_LINES] = { -1 };
 
@@ -645,7 +645,7 @@ static void process_edge(int offset, int value) {
 
   //
   // The idea of using a nested if (rather than a switch) is to
-  // guarantee that encoder events are handled as fast as possible.
+  // ensure that encoder events are handled as fast as possible.
   // The (optical) VFO encoders fire orders of magnitudes faster
   // than all other encoders and switches. They are bottom encoders
   // in all cases so bottom encoders will he handled first.
@@ -1075,7 +1075,7 @@ static gpointer monitor_thread(gpointer arg) {
 
 #endif
 #ifdef GPIOV2
-  int event_buf_size = MAX_LINES;
+  size_t event_buf_size = 64; // the default capacity
   struct gpiod_edge_event_buffer *event_buffer = gpiod_edge_event_buffer_new(event_buf_size);
 
   if (!event_buffer) {
@@ -1084,8 +1084,12 @@ static gpointer monitor_thread(gpointer arg) {
   }
 
   for (;;) {
-    if (!input_request) { break; }  // set to NULL in gpio_close
+    if (!input_request) { break; }  // could be set to NULL in gpio_close
 
+    //
+    // This blocks (infinitely) until an event happens.
+    // For clean shutdown, we can use gpiod_line_request_wait_edge_events() before
+    //
     ret = gpiod_line_request_read_edge_events(input_request, event_buffer, event_buf_size);
 
     if (ret < 0) {
@@ -1093,8 +1097,9 @@ static gpointer monitor_thread(gpointer arg) {
       continue;
     }
 
-    for (int i = 0; i < ret; i++) {
+    for (unsigned long i = 0; i < ret; i++) {
       struct gpiod_edge_event *event = gpiod_edge_event_buffer_get_event(event_buffer, i);
+      if (!event) { continue; }  // This is paranoia
       int offset = gpiod_edge_event_get_line_offset(event);
 
       switch (gpiod_edge_event_get_event_type(event)) {
